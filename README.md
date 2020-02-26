@@ -4,8 +4,7 @@
 # AWS Route 53 Resolver rules
 module "r53-resolver-rules" {
   source            = "../modules/terraform-aws-route53-resolver-rules"
-  
-  associated_vpcs   = [var.vpc_id]
+
   resolver_endpoint = module.r53-resolver-outboud.endpoint_id
 
   rules = [
