@@ -12,7 +12,7 @@ resource "aws_route53_resolver_rule" "r" {
     for_each = lookup(element(var.rules, count.index), "ips", [])
     content {
       ip   = split(":", target_ip.value)[0]
-      port = length( split(":", target_ip.value)) == 1 ? 53 : split(":", target_ip.value)[1]
+      port = length(split(":", target_ip.value)) == 1 ? 53 : split(":", target_ip.value)[1]
     }
   }
 
@@ -32,16 +32,22 @@ resource "aws_route53_resolver_rule_association" "ra" {
 
 
 # RAM association
+# One per rule
 resource "aws_ram_resource_share" "endpoint_share" {
-  count                     = length(local.ram_associations)
-  name                      = "r53-${lookup(element(local.ram_associations, count.index), "domain_name")}-${count.index}"
+  count                     = length(var.rules)
+  name                      = "r53-${lookup(element(var.rules, count.index), "domain_name")}"
   allow_external_principals = false
 }
 
+# Add princpials to the above resource share
 resource "aws_ram_principal_association" "endpoint_ram_principal" {
-  count              = length(local.ram_associations)
-  principal          = lookup(element(local.ram_associations, count.index), "principal_id")
-  resource_share_arn = aws_ram_resource_share.endpoint_share[count.index].arn
+  count     = length(local.ram_associations)
+  principal = lookup(element(local.ram_associations, count.index), "principal_id")
+  resource_share_arn = element(aws_ram_resource_share.endpoint_share.*.arn,
+    index(aws_ram_resource_share.endpoint_share.*.name, "r53-${lookup(element(var.rules, count.index), "domain_name")}"
+  ))
+
+  depends_on = [aws_ram_resource_share.endpoint_share]
 }
 
 resource "aws_ram_resource_association" "endpoint_ram_resource" {
