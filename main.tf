@@ -30,7 +30,6 @@ resource "aws_route53_resolver_rule_association" "ra" {
   depends_on = [aws_route53_resolver_rule.r]
 }
 
-
 # RAM association
 # One per rule
 resource "aws_ram_resource_share" "endpoint_share" {
@@ -60,7 +59,7 @@ resource "aws_ram_resource_association" "endpoint_ram_resource" {
 }
 
 locals {
-
+  # rules
   rules = [
     for rule in var.rules : {
       rule_name   = lookup(rule, "rule_name", "${lookup(rule, "domain_name")}-rule")
