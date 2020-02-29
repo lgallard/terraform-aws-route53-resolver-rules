@@ -67,8 +67,10 @@ module "r53-resolver-rules" {
 | rules | List of rules | `list` | `[]` | no |
 | tags | Map of tags to apply to supported resources | `map(string)` | `{}` | no |
 
+Each rule accept the following parameters:
+
 ### Rules
-Each rule accept the folowing parameters:
+
 | Name | Description | Type | Default | Required |
 |------|-------------|:----:|:-----:|:-----:|
 | domain\_name | Domain name to forward requests for | string | `null` | yes |
