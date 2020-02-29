@@ -1,3 +1,9 @@
+## 0.1.2 (February 29, 2020)
+
+UPDATE:
+
+  * Update README
+
 ## 0.1.1 (February 28, 2020)
 
 FIX:
