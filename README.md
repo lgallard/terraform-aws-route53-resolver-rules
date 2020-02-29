@@ -1,4 +1,4 @@
-﻿# terraform-aws-route53-resolver-rules
+# terraform-aws-route53-resolver-rules
 
 Terraform module to create [AWS Route53 Resolver Rules](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resolver.html/).
 
