@@ -4,7 +4,7 @@ Terraform module to create [AWS Route53 Resolver Rules](https://docs.aws.amazon.
 
 ## Usage
 
-Before you start to forward queries, you must create  Resolver outbound endpoints in the connected VPCs. These endpoints provide a path for inbound or outbound queries. To accomplish this you can create the endpoints using the [aws_route54_resolver_endpoint](https://www.terraform.io/docs/providers/aws/r/route53_resolver_endpoint.html) resource or use a module like the [terraform-aws-route53-endpoint](https://github.com/rhythmictech/terraform-aws-route53-endpoint)
+Before you start to forward queries, you must create  Resolver outbound endpoints in the connected VPCs. These endpoints provide a path for inbound or outbound queries. To accomplish this you can create the endpoints using the [aws_route53_resolver_endpoint](https://www.terraform.io/docs/providers/aws/r/route53_resolver_endpoint.html) resource or use a module like the [terraform-aws-route53-endpoint](https://github.com/rhythmictech/terraform-aws-route53-endpoint)
 
 Check the [examples](examples/) folder for the **simple** and the **complete** snippets.
 
