@@ -2,8 +2,7 @@
 
 ENHANCEMENTS::
 
-* Add simple and comple examples
-
+* Add simple and complete examples
 
 ## 0.1.3 (April 1, 2020)
 
