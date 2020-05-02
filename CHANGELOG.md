@@ -1,3 +1,10 @@
+## 0.1.4 (May 2, 2020)
+
+ENHANCEMENTS::
+
+* Add simple and comple examples
+
+
 ## 0.1.3 (April 1, 2020)
 
 UPDATES:
