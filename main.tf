@@ -35,7 +35,7 @@ resource "aws_route53_resolver_rule_association" "ra" {
 resource "aws_ram_resource_share" "endpoint_share" {
   count                     = length(local.rules)
   name                      = lookup(element(local.rules, count.index), "ram_name")
-  allow_external_principals = false
+  allow_external_principals = var.allow_external_principals
 }
 
 # Add principals to the above resource share

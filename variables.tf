@@ -6,11 +6,15 @@ variable "resolver_endpoint_id" {
 variable "rules" {
   default     = []
   description = "List of rules"
-  type        = list
+  type        = list(any)
 }
 
 variable "tags" {
   default     = {}
   description = "Map of tags to apply to supported resources"
   type        = map(string)
+}
+
+variable "allow_external_principals" {
+  default = false
 }

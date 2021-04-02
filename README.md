@@ -66,6 +66,7 @@ module "r53-resolver-rules" {
 |------|-------------|------|---------|:--------:|
 | resolver\_endpoint\_id | The ID of the outbound resolver endpoint that you want to use to route DNS queries to the IP addresses that you specify using target\_ip. | `string` | `null` | yes |
 | rules | List of rules | `list` | `[]` | no |
+| allow_external_principals | Allow rules to be shared with other AWS accounts | `bool` | `false` | no |
 | tags | Map of tags to apply to supported resources | `map(string)` | `{}` | no |
 
 Each rule accept the following parameters:
