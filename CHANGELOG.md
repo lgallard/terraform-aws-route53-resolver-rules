@@ -2,7 +2,7 @@
 
 FIX:
 
-* fix(RAM): not working with principals = []
+* fix(RAM): not working with principals = [] (thanks @astephanh)
 
 * Fix typo
 ## 0.1.4 (May 2, 2020)
