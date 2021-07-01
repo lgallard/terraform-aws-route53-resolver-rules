@@ -1,3 +1,10 @@
+## 0.1.5 (July 1, 2021)
+
+FIX:
+
+* fix(RAM): not working with principals = []
+
+* Fix typo
 ## 0.1.4 (May 2, 2020)
 
 ENHANCEMENTS::
