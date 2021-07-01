@@ -33,7 +33,7 @@ resource "aws_route53_resolver_rule_association" "ra" {
 # RAM association
 # One per rule
 resource "aws_ram_resource_share" "endpoint_share" {
-  count                     = length(local.rules)
+  count                     = length(local.ram_associations)
   name                      = lookup(element(local.rules, count.index), "ram_name")
   allow_external_principals = false
 }
@@ -50,7 +50,7 @@ resource "aws_ram_principal_association" "endpoint_ram_principal" {
 }
 
 resource "aws_ram_resource_association" "endpoint_ram_resource" {
-  count = length(local.rules)
+  count = length(local.ram_associations)
   resource_arn = element(aws_route53_resolver_rule.r.*.arn,
     index(aws_route53_resolver_rule.r.*.domain_name, lookup(element(local.rules, count.index), "domain_name")
   ))
@@ -84,7 +84,7 @@ locals {
   # ram_associations
   ram_associations = flatten([
     for rule in var.rules : [
-      for principal in lookup(rule, "principals") : {
+      for principal in lookup(rule, "principals", []) : {
         principal_id = principal
         ram_name     = lookup(rule, "ram_name", lookup(rule, "domain_name"))
       }
