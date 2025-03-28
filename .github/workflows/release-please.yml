@@ -11,9 +11,16 @@ jobs:
     outputs:
       release_created: ${{ steps.release_please.outputs.release_created }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v3
         id: release_please
         with:
           release-type: terraform-module
           token: ${{ secrets.GITHUB_TOKEN }}
-          config-file: .github/.release-please-config.json 
+          config-file: .github/.release-please-config.json
+          monorepo-tags: false
+          default-branch: master
+          release-as: patch
+          command: github-release
+          skip-labeling: true
+          extra-files: |
+            README.md 
