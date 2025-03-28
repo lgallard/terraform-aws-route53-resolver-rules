@@ -1,47 +1,14 @@
 {
+  "release-type": "terraform-module",
+  "changelog-path": "CHANGELOG.md",
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": true,
+  "include-v-in-tag": false,
+  "tag-separator": "",
   "packages": {
     ".": {
       "release-type": "terraform-module",
-      "package-name": "terraform-aws-route53-resolver-rules",
-      "versioning": "always-bump-patch",
-      "bump-minor-pre-major": true,
-      "bump-patch-for-minor-pre-major": true,
-      "include-v-in-tag": false,
-      "tag-format": "${version}",
-      "extra-files": [],
-      "changelog-path": "CHANGELOG.md",
-      "draft": false,
-      "prerelease": false
+      "changelog-path": "CHANGELOG.md"
     }
-  },
-  "release-search-depth": 10,
-  "include-component-in-tag": false,
-  "include-v-in-tag": false,
-  "tag-format": "${version}",
-  "pull-request-title-pattern": "chore${scope}: release${component} ${version}",
-  "changelog-types": [
-    {"type": "feat", "section": "Added", "hidden": false},
-    {"type": "fix", "section": "Fixed", "hidden": false},
-    {"type": "chore", "section": "Changed", "hidden": false},
-    {"type": "refactor", "section": "Refactored", "hidden": false},
-    {"type": "style", "section": "Styled", "hidden": false},
-    {"type": "security", "section": "Security", "hidden": false},
-    {"type": "docs", "section": "Documentation", "hidden": false},
-    {"type": "perf", "section": "Performance", "hidden": false}
-  ],
-  "changelog-sections": {
-    "header": "## ${version} (${date})",
-    "sections": {
-      "Added": "### Added",
-      "Changed": "### Changed",
-      "Fixed": "### Fixed",
-      "Documentation": "### Documentation",
-      "Security": "### Security",
-      "Performance": "### Performance"
-    }
-  },
-  "date-formats": {
-    "changelogDate": "(%B %d, %Y)"
-  },
-  "group-pull-request-title-pattern": "chore: release ${version}"
+  }
 } 
