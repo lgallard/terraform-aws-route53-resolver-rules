@@ -5,7 +5,7 @@ FIX:
 * fix(RAM): not working with principals = [] (thanks @astephanh)
 
 * Fix typo
-## [0.1.6](https://github.com/lgallard/terraform-aws-route53-resolver-rules/compare/0.1.5...v0.1.6) (2025-03-28)
+## [0.1.6](https://github.com/lgallard/terraform-aws-route53-resolver-rules/compare/0.1.5...0.1.6) (2025-03-28)
 
 
 ### Bug Fixes
