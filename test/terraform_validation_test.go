@@ -2,6 +2,7 @@ package test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	awshelper "github.com/gruntwork-io/terratest/modules/aws"
@@ -448,138 +449,6 @@ func TestTerraformRoute53ResolverRulesLocalValues(t *testing.T) {
 	t.Log("Local value calculations validation passed")
 }
 
-// TestTerraformRoute53ResolverRulesEdgeCases tests edge cases and boundary conditions
-func TestTerraformRoute53ResolverRulesEdgeCases(t *testing.T) {
-	t.Parallel()
-
-	awsRegion := awshelper.GetRandomStableRegion(t, nil, nil)
-
-	testCases := []struct {
-		name        string
-		description string
-		vars        map[string]interface{}
-		expectError bool
-	}{
-		{
-			name:        "single_ip_address",
-			description: "Test with single IP address",
-			vars: map[string]interface{}{
-				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "type-test"),
-				"rules": []map[string]interface{}{
-					{
-						"domain_name": "single-ip.example.com.",
-						"rule_name":   "single-ip-rule",
-						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
-						"ips":         []string{"192.168.1.10"},
-					},
-				},
-			},
-			expectError: false,
-		},
-		{
-			name:        "single_vpc_association",
-			description: "Test with single VPC association",
-			vars: map[string]interface{}{
-				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "type-test"),
-				"rules": []map[string]interface{}{
-					{
-						"domain_name": "single-vpc.example.com.",
-						"rule_name":   "single-vpc-rule",
-						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
-						"ips":         []string{"192.168.1.10", "192.168.1.11"},
-					},
-				},
-			},
-			expectError: false,
-		},
-		{
-			name:        "single_principal",
-			description: "Test with single RAM principal",
-			vars: map[string]interface{}{
-				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "type-test"),
-				"rules": []map[string]interface{}{
-					{
-						"domain_name": "single-principal.example.com.",
-						"rule_name":   "single-principal-rule",
-						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
-						"ips":         []string{"192.168.1.10"},
-						"principals":  []string{GenerateTestResourceName("account", "principal-1")},
-					},
-				},
-			},
-			expectError: false,
-		},
-		{
-			name:        "high_port_number",
-			description: "Test with high port number (65535)",
-			vars: map[string]interface{}{
-				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "type-test"),
-				"rules": []map[string]interface{}{
-					{
-						"domain_name": "high-port.example.com.",
-						"rule_name":   "high-port-rule",
-						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
-						"ips":         []string{"192.168.1.10:65535"},
-					},
-				},
-			},
-			expectError: false,
-		},
-		{
-			name:        "no_vpc_associations",
-			description: "Test rule without VPC associations",
-			vars: map[string]interface{}{
-				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "type-test"),
-				"rules": []map[string]interface{}{
-					{
-						"domain_name": "no-vpc.example.com.",
-						"rule_name":   "no-vpc-rule",
-						"vpc_ids":     []string{}, // Empty VPC list
-						"ips":         []string{"192.168.1.10"},
-					},
-				},
-			},
-			expectError: false,
-		},
-		{
-			name:        "no_ram_principals",
-			description: "Test rule without RAM principals",
-			vars: map[string]interface{}{
-				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "type-test"),
-				"rules": []map[string]interface{}{
-					{
-						"domain_name": "no-ram.example.com.",
-						"rule_name":   "no-ram-rule",
-						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
-						"ips":         []string{"192.168.1.10"},
-						"principals":  []string{}, // Empty principals list
-					},
-				},
-			},
-			expectError: false,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			terraformOptions := &terraform.Options{
-				TerraformDir: "../",
-				Vars:         tc.vars,
-				EnvVars: map[string]string{
-					"AWS_DEFAULT_REGION": awsRegion,
-				},
-			}
-
-			if tc.expectError {
-				_, err := terraform.InitAndPlanE(t, terraformOptions)
-				assert.Error(t, err, "Expected error for edge case: %s", tc.name)
-			} else {
-				terraform.InitAndPlan(t, terraformOptions)
-				t.Logf("Edge case validation passed for: %s - %s", tc.name, tc.description)
-			}
-		})
-	}
-}
 
 // TestTerraformRoute53ResolverRulesNetworkAndServiceErrors tests network timeouts and AWS service error scenarios
 func TestTerraformRoute53ResolverRulesNetworkAndServiceErrors(t *testing.T) {

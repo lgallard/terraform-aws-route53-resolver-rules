@@ -872,7 +872,7 @@ func TestTerraformRoute53ResolverRulesCrossRegionErrors(t *testing.T) {
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "cross-region.example.com.",
-						"rule_name":   fmt.Sprintf("cross-region-rule-%s", uniqueID),
+						"rule_name":   fmt.Sprintf("cross-region-rule-%s", sessionID),
 						"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", "cross-region", sessionID)},
 						"ips":         []string{"192.168.1.10"},
 					},
@@ -889,8 +889,8 @@ func TestTerraformRoute53ResolverRulesCrossRegionErrors(t *testing.T) {
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "ram-cross-region.example.com.",
-						"rule_name":   fmt.Sprintf("ram-cross-rule-%s", uniqueID),
-						"ram_name":    fmt.Sprintf("ram-cross-share-%s", uniqueID),
+						"rule_name":   fmt.Sprintf("ram-cross-rule-%s", sessionID),
+						"ram_name":    fmt.Sprintf("ram-cross-share-%s", sessionID),
 						"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", "ram-cross", sessionID)},
 						"ips":         []string{"192.168.1.10"},
 						"principals":  []string{GenerateTestResourceNameWithSession("account", "cross-principal", sessionID)},
@@ -908,7 +908,7 @@ func TestTerraformRoute53ResolverRulesCrossRegionErrors(t *testing.T) {
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "region-mismatch.example.com.",
-						"rule_name":   fmt.Sprintf("region-mismatch-rule-%s", uniqueID),
+						"rule_name":   fmt.Sprintf("region-mismatch-rule-%s", sessionID),
 						"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", "region-mismatch", sessionID)},
 						"ips":         []string{"192.168.1.10"},
 					},
@@ -927,7 +927,7 @@ func TestTerraformRoute53ResolverRulesCrossRegionErrors(t *testing.T) {
 					for i := 0; i < 5; i++ {
 						rules[i] = map[string]interface{}{
 							"domain_name": fmt.Sprintf("multi-region-%d.example.com.", i),
-							"rule_name":   fmt.Sprintf("multi-region-rule-%d-%s", i, uniqueID),
+							"rule_name":   fmt.Sprintf("multi-region-rule-%d-%s", i, sessionID),
 							"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", fmt.Sprintf("multi-region-%d", i), sessionID)},
 							"ips":         []string{"192.168.1.10"},
 						}
@@ -946,7 +946,7 @@ func TestTerraformRoute53ResolverRulesCrossRegionErrors(t *testing.T) {
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "unsupported-region.example.com.",
-						"rule_name":   fmt.Sprintf("unsupported-rule-%s", uniqueID),
+						"rule_name":   fmt.Sprintf("unsupported-rule-%s", sessionID),
 						"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", "unsupported", sessionID)},
 						"ips":         []string{"192.168.1.10"},
 					},
@@ -1008,7 +1008,6 @@ func TestTerraformRoute53ResolverRulesCrossRegionErrors(t *testing.T) {
 func TestTerraformRoute53ResolverRulesEdgeCases(t *testing.T) {
 	t.Parallel()
 
-	uniqueID := random.UniqueId()
 	awsRegion := awshelper.GetRandomStableRegion(t, nil, nil)
 	
 	// Verify test environment safety
