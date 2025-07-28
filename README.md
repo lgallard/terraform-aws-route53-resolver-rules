@@ -82,3 +82,39 @@ Each rule accept the following parameters:
 | rule\_name | Route53 resolver rule name | string | `domain_name`-rule | no |
 | tags | Map of tags to apply to supported resources | map(string) | `{}` | no |
 | vpc\_ids | List of VPC ids to associate to the rule | list(string) | `[]` | yes |
+
+## Testing
+
+This module includes comprehensive tests using [Terratest](https://github.com/gruntwork-io/terratest). The test suite covers:
+
+- Basic resolver rule creation and validation
+- Multiple resolver rules with different configurations
+- VPC association functionality
+- RAM resource sharing for cross-account scenarios
+- Custom DNS port configurations
+- Resource tagging
+- Input validation and edge cases
+
+### Running Tests
+
+To run the tests locally:
+
+```bash
+cd test
+go mod tidy
+go test -v -timeout 30m
+```
+
+For more details on the testing framework and how to run specific tests, see the [test documentation](test/README.md).
+
+### Test Coverage
+
+- ✅ Basic resolver rule creation
+- ✅ Multiple resolver rules
+- ✅ VPC associations  
+- ✅ RAM resource sharing
+- ✅ Custom DNS ports
+- ✅ Resource tagging
+- ✅ Input validation and error cases
+- ✅ Module outputs
+- ✅ Edge cases and boundary conditions

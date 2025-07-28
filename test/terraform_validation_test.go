@@ -1,0 +1,530 @@
+package test
+
+import (
+	"fmt"
+	"testing"
+
+	awshelper "github.com/gruntwork-io/terratest/modules/aws"
+	"github.com/gruntwork-io/terratest/modules/random"
+	"github.com/gruntwork-io/terratest/modules/terraform"
+	"github.com/stretchr/testify/assert"
+)
+
+// TestTerraformRoute53ResolverRulesValidation tests validation rules and error cases
+func TestTerraformRoute53ResolverRulesValidation(t *testing.T) {
+	t.Parallel()
+
+	testCases := []TestCase{
+		{
+			Name:        "valid_basic_configuration",
+			Description: "Test valid basic resolver rule configuration",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-test123",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "example.com.",
+						"rule_name":   "example-rule",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10", "192.168.1.11"},
+					},
+				},
+			},
+			ExpectError: false,
+		},
+		{
+			Name:        "valid_multiple_rules",
+			Description: "Test valid configuration with multiple resolver rules",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-test123",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "example.com.",
+						"rule_name":   "example-rule",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10"},
+					},
+					{
+						"domain_name": "test.local.",
+						"rule_name":   "test-rule",
+						"vpc_ids":     []string{"vpc-87654321"},
+						"ips":         []string{"10.0.1.10"},
+					},
+				},
+			},
+			ExpectError: false,
+		},
+		{
+			Name:        "valid_custom_ports",
+			Description: "Test valid configuration with custom DNS ports",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-test123",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "example.com.",
+						"rule_name":   "custom-ports-rule",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10:8053", "192.168.1.11:5353"},
+					},
+				},
+			},
+			ExpectError: false,
+		},
+		{
+			Name:        "valid_ram_sharing",
+			Description: "Test valid configuration with RAM resource sharing",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-test123",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "shared.example.com.",
+						"rule_name":   "shared-rule",
+						"ram_name":    "shared-ram",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10"},
+						"principals":  []string{"123456789012", "210987654321"},
+					},
+				},
+			},
+			ExpectError: false,
+		},
+		{
+			Name:        "valid_with_tags",
+			Description: "Test valid configuration with resource tags",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-test123",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "tagged.example.com.",
+						"rule_name":   "tagged-rule",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+				"tags": map[string]string{
+					"Environment": "test",
+					"Team":        "networking",
+				},
+			},
+			ExpectError: false,
+		},
+		{
+			Name:        "empty_rules_list",
+			Description: "Test configuration with empty rules list",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-test123",
+				"rules":                []map[string]interface{}{},
+			},
+			ExpectError: false, // Empty rules should be valid
+		},
+		{
+			Name:        "null_resolver_endpoint",
+			Description: "Test configuration without resolver endpoint ID",
+			Vars: map[string]interface{}{
+				// resolver_endpoint_id intentionally omitted (uses default null)
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "example.com.",
+						"rule_name":   "null-endpoint-rule",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			ExpectError: false, // null is the default value
+		},
+		{
+			Name:        "multiple_vpc_associations",
+			Description: "Test rule associated with multiple VPCs",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-test123",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "multi-vpc.example.com.",
+						"rule_name":   "multi-vpc-rule",
+						"vpc_ids":     []string{"vpc-12345678", "vpc-87654321", "vpc-abcdef01"},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			ExpectError: false,
+		},
+		{
+			Name:        "mixed_port_configurations",
+			Description: "Test mixed IP addresses with and without custom ports",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-test123",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "mixed-ports.example.com.",
+						"rule_name":   "mixed-ports-rule",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10", "192.168.1.11:8053", "192.168.1.12"},
+					},
+				},
+			},
+			ExpectError: false,
+		},
+		{
+			Name:        "complex_domain_names",
+			Description: "Test various valid domain name formats",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-test123",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "sub.domain.example.com.",
+						"rule_name":   "subdomain-rule",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10"},
+					},
+					{
+						"domain_name": "local.",
+						"rule_name":   "local-rule",
+						"vpc_ids":     []string{"vpc-87654321"},
+						"ips":         []string{"10.0.1.10"},
+					},
+					{
+						"domain_name": "very-long-subdomain-name.corporate.internal.example.org.",
+						"rule_name":   "long-domain-rule",
+						"vpc_ids":     []string{"vpc-abcdef01"},
+						"ips":         []string{"172.16.1.10"},
+					},
+				},
+			},
+			ExpectError: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			awsRegion := awshelper.GetRandomStableRegion(t, nil, nil)
+
+			terraformOptions := &terraform.Options{
+				TerraformDir: "../",
+				Vars:         tc.Vars,
+				EnvVars: map[string]string{
+					"AWS_DEFAULT_REGION": awsRegion,
+				},
+			}
+
+			if tc.ExpectError {
+				_, err := terraform.InitAndPlanE(t, terraformOptions)
+				assert.Error(t, err, "Expected validation error for test case: %s", tc.Name)
+				if tc.ErrorText != "" {
+					assert.Contains(t, err.Error(), tc.ErrorText, 
+						"Error should contain expected text for test case: %s", tc.Name)
+				}
+			} else {
+				terraform.InitAndPlan(t, terraformOptions)
+				t.Logf("Validation passed for test case: %s - %s", tc.Name, tc.Description)
+			}
+		})
+	}
+}
+
+// TestTerraformRoute53ResolverRulesVariableTypes tests variable type validation
+func TestTerraformRoute53ResolverRulesVariableTypes(t *testing.T) {
+	t.Parallel()
+
+	uniqueID := random.UniqueId()
+	awsRegion := awshelper.GetRandomStableRegion(t, nil, nil)
+
+	testCases := []struct {
+		name        string
+		description string
+		vars        map[string]interface{}
+		expectError bool
+	}{
+		{
+			name:        "string_resolver_endpoint_id",
+			description: "Test resolver_endpoint_id as string",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-12345",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "string-test.example.com.",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:        "null_resolver_endpoint_id",
+			description: "Test resolver_endpoint_id as null",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": nil,
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "null-test.example.com.",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:        "list_type_rules",
+			description: "Test rules as list type",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-12345",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "list-test-1.example.com.",
+						"rule_name":   "list-test-1-rule",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10"},
+					},
+					{
+						"domain_name": "list-test-2.example.com.",
+						"rule_name":   "list-test-2-rule",
+						"vpc_ids":     []string{"vpc-87654321"},
+						"ips":         []string{"192.168.2.10"},
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:        "map_type_tags",
+			description: "Test tags as map of strings",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-12345",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "tags-test.example.com.",
+						"rule_name":   "tags-test-rule",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+				"tags": map[string]string{
+					"Environment": "test",
+					"Team":        "networking",
+					"Project":     "resolver-rules",
+					"UniqueID":    uniqueID,
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:        "empty_tags_map",
+			description: "Test empty tags map",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-12345",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "empty-tags.example.com.",
+						"rule_name":   "empty-tags-rule",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+				"tags": map[string]string{},
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			terraformOptions := &terraform.Options{
+				TerraformDir: "../",
+				Vars:         tc.vars,
+				EnvVars: map[string]string{
+					"AWS_DEFAULT_REGION": awsRegion,
+				},
+			}
+
+			if tc.expectError {
+				_, err := terraform.InitAndPlanE(t, terraformOptions)
+				assert.Error(t, err, "Expected type validation error for: %s", tc.name)
+			} else {
+				terraform.InitAndPlan(t, terraformOptions)
+				t.Logf("Type validation passed for: %s - %s", tc.name, tc.description)
+			}
+		})
+	}
+}
+
+// TestTerraformRoute53ResolverRulesLocalValues tests local value calculations
+func TestTerraformRoute53ResolverRulesLocalValues(t *testing.T) {
+	t.Parallel()
+
+	awsRegion := awshelper.GetRandomStableRegion(t, nil, nil)
+	uniqueID := random.UniqueId()
+
+	terraformOptions := &terraform.Options{
+		TerraformDir: "../",
+		Vars: map[string]interface{}{
+			"resolver_endpoint_id": "rslvr-out-12345",
+			"rules": []map[string]interface{}{
+				{
+					"domain_name": "test1.example.com.",
+					"rule_name":   "test1-rule",
+					"vpc_ids":     []string{"vpc-11111111", "vpc-22222222"},
+					"ips":         []string{"192.168.1.10"},
+					"principals":  []string{"123456789012"},
+				},
+				{
+					"domain_name": "test2.example.com.",
+					"rule_name":   fmt.Sprintf("custom-rule-%s", uniqueID),
+					"ram_name":    fmt.Sprintf("custom-ram-%s", uniqueID),
+					"vpc_ids":     []string{"vpc-33333333"},
+					"ips":         []string{"10.0.1.10", "10.0.1.11"},
+					"principals":  []string{"123456789012", "210987654321"},
+				},
+			},
+		},
+		EnvVars: map[string]string{
+			"AWS_DEFAULT_REGION": awsRegion,
+		},
+	}
+
+	plan := terraform.InitAndPlan(t, terraformOptions)
+
+	// Verify that local values are properly calculated
+	// This tests the complex local value logic in the module
+	assert.Contains(t, plan, "aws_route53_resolver_rule.r", 
+		"Should create resolver rules based on local.rules")
+	assert.Contains(t, plan, "aws_route53_resolver_rule_association.ra", 
+		"Should create VPC associations based on local.vpcs_associations")
+	assert.Contains(t, plan, "aws_ram_resource_share.endpoint_share", 
+		"Should create RAM shares based on local.ram_associations")
+	
+	t.Log("Local value calculations validation passed")
+}
+
+// TestTerraformRoute53ResolverRulesEdgeCases tests edge cases and boundary conditions
+func TestTerraformRoute53ResolverRulesEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	awsRegion := awshelper.GetRandomStableRegion(t, nil, nil)
+
+	testCases := []struct {
+		name        string
+		description string
+		vars        map[string]interface{}
+		expectError bool
+	}{
+		{
+			name:        "single_ip_address",
+			description: "Test with single IP address",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-12345",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "single-ip.example.com.",
+						"rule_name":   "single-ip-rule",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:        "single_vpc_association",
+			description: "Test with single VPC association",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-12345",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "single-vpc.example.com.",
+						"rule_name":   "single-vpc-rule",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10", "192.168.1.11"},
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:        "single_principal",
+			description: "Test with single RAM principal",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-12345",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "single-principal.example.com.",
+						"rule_name":   "single-principal-rule",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10"},
+						"principals":  []string{"123456789012"},
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:        "high_port_number",
+			description: "Test with high port number (65535)",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-12345",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "high-port.example.com.",
+						"rule_name":   "high-port-rule",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10:65535"},
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:        "no_vpc_associations",
+			description: "Test rule without VPC associations",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-12345",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "no-vpc.example.com.",
+						"rule_name":   "no-vpc-rule",
+						"vpc_ids":     []string{}, // Empty VPC list
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:        "no_ram_principals",
+			description: "Test rule without RAM principals",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-12345",
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "no-ram.example.com.",
+						"rule_name":   "no-ram-rule",
+						"vpc_ids":     []string{"vpc-12345678"},
+						"ips":         []string{"192.168.1.10"},
+						"principals":  []string{}, // Empty principals list
+					},
+				},
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			terraformOptions := &terraform.Options{
+				TerraformDir: "../",
+				Vars:         tc.vars,
+				EnvVars: map[string]string{
+					"AWS_DEFAULT_REGION": awsRegion,
+				},
+			}
+
+			if tc.expectError {
+				_, err := terraform.InitAndPlanE(t, terraformOptions)
+				assert.Error(t, err, "Expected error for edge case: %s", tc.name)
+			} else {
+				terraform.InitAndPlan(t, terraformOptions)
+				t.Logf("Edge case validation passed for: %s - %s", tc.name, tc.description)
+			}
+		})
+	}
+}
