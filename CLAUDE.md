@@ -81,7 +81,11 @@ ips = [
 
 # Internal parsing logic splits on colon with proper error handling
 ip   = split(":", target_ip.value)[0]
-port = length(split(":", target_ip.value)) == 1 ? 53 : tonumber(split(":", target_ip.value)[1])
+port = length(split(":", target_ip.value)) == 1 ? 53 : (
+  can(tonumber(split(":", target_ip.value)[1])) ? 
+  tonumber(split(":", target_ip.value)[1]) : 
+  53  # Default to port 53 if conversion fails
+)
 ```
 
 ## Networking Considerations
@@ -540,7 +544,7 @@ variable "resolver_security_group_rules" {
 variable "allowed_dns_networks" {
   description = "CIDR blocks allowed to use DNS forwarding"
   type        = list(string)
-  default     = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+  default     = ["10.0.1.0/24", "10.0.2.0/24"]  # Use specific subnets instead of broad ranges
 
   validation {
     condition = alltrue([
@@ -667,15 +671,15 @@ resource "aws_cloudwatch_metric_alarm" "dns_query_rate" {
 
 ```hcl
 locals {
-  # Process rules with defaults
+  # Process rules with defaults - optimized with direct attribute access
   rules = [
     for rule in var.rules : {
-      rule_name   = lookup(rule, "rule_name", "${lookup(rule, "domain_name")}-rule")
-      domain_name = lookup(rule, "domain_name", null)
-      ram_name    = lookup(rule, "ram_name", "r53-${lookup(rule, "domain_name")}")
-      vpc_ids     = lookup(rule, "vpc_ids", [])
-      ips         = lookup(rule, "ips", null)
-      principals  = lookup(rule, "principals", [])
+      rule_name   = coalesce(rule.rule_name, "${rule.domain_name}-rule")
+      domain_name = rule.domain_name
+      ram_name    = coalesce(rule.ram_name, "r53-${rule.domain_name}")
+      vpc_ids     = rule.vpc_ids
+      ips         = rule.ips
+      principals  = coalesce(rule.principals, [])
     }
   ]
 
