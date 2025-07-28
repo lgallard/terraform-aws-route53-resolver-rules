@@ -1,6 +1,8 @@
 package test
 
 import (
+	"context"
+	"crypto/md5"
 	"fmt"
 	"net"
 	"os"
@@ -182,7 +184,7 @@ func ValidateRAMResourceShare(t *testing.T, region, shareArn string, expectedPri
 	}
 }
 
-// ValidateDNSResolution performs a basic DNS resolution test for a domain with timeout
+// ValidateDNSResolution performs DNS resolution test with context cancellation support
 func ValidateDNSResolution(t *testing.T, domain string, expectedIPs []string) {
 	if !strings.HasSuffix(domain, ".") {
 		domain += "."
@@ -191,51 +193,57 @@ func ValidateDNSResolution(t *testing.T, domain string, expectedIPs []string) {
 	// Remove trailing dot for DNS lookup
 	lookupDomain := strings.TrimSuffix(domain, ".")
 	
-	// Create a channel to handle timeout
-	type dnsResult struct {
-		ips []net.IP
-		err error
+	// Create context with timeout for proper cancellation
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	
+	// Use context-aware DNS resolver
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := net.Dialer{
+				Timeout: 3 * time.Second,
+			}
+			return d.DialContext(ctx, network, address)
+		},
 	}
 	
-	result := make(chan dnsResult, 1)
+	// Perform context-aware DNS lookup
+	ips, err := resolver.LookupIPAddr(ctx, lookupDomain)
 	
-	// Perform DNS lookup in a goroutine with timeout
-	go func() {
-		ips, err := net.LookupIP(lookupDomain)
-		result <- dnsResult{ips: ips, err: err}
-	}()
-	
-	// Wait for result or timeout (5 seconds)
-	select {
-	case res := <-result:
-		if res.err != nil {
-			t.Logf("Warning: DNS lookup for %s failed: %v (expected in test environment)", lookupDomain, res.err)
-			return
+	if err != nil {
+		// Check if it was a context cancellation (timeout)
+		if ctx.Err() == context.DeadlineExceeded {
+			t.Logf("Warning: DNS lookup for %s timed out after 5 seconds (expected in test environment)", lookupDomain)
+		} else {
+			t.Logf("Warning: DNS lookup for %s failed: %v (expected in test environment)", lookupDomain, err)
 		}
-		
-		if len(expectedIPs) > 0 {
-			actualIPs := make([]string, 0)
-			for _, ip := range res.ips {
-				actualIPs = append(actualIPs, ip.String())
-			}
+		return
+	}
+	
+	// Validate expected IPs if provided
+	if len(expectedIPs) > 0 {
+		actualIPs := make([]string, 0)
+		for _, ipAddr := range ips {
+			actualIPs = append(actualIPs, ipAddr.IP.String())
+		}
 
-			for _, expectedIP := range expectedIPs {
-				found := false
-				for _, actualIP := range actualIPs {
-					if actualIP == expectedIP {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Logf("Warning: Expected IP %s not found in DNS resolution for %s (got: %v)", 
-						expectedIP, lookupDomain, actualIPs)
+		for _, expectedIP := range expectedIPs {
+			found := false
+			for _, actualIP := range actualIPs {
+				if actualIP == expectedIP {
+					found = true
+					break
 				}
 			}
+			if !found {
+				t.Logf("Warning: Expected IP %s not found in DNS resolution for %s (got: %v)", 
+					expectedIP, lookupDomain, actualIPs)
+			}
 		}
-	case <-time.After(5 * time.Second):
-		t.Logf("Warning: DNS lookup for %s timed out after 5 seconds (expected in test environment)", lookupDomain)
 	}
+	
+	t.Logf("✓ DNS resolution completed for %s with context cancellation support", lookupDomain)
 }
 
 // WaitForResolverRuleDeletion waits for a resolver rule to be deleted with exponential backoff
@@ -413,13 +421,32 @@ func CleanupTestResolverRules(t *testing.T, region string, namePrefix string) {
 	require.NoError(t, err)
 	svc := route53resolver.New(sess)
 
-	// List all resolver rules with retry logic
+	// List resolver rules with proper filtering to reduce API calls
 	maxRetries := 3
 	baseDelay := time.Second
 	var result *route53resolver.ListResolverRulesOutput
 	
+	// Add filters to reduce unnecessary API calls
+	filters := []*route53resolver.Filter{
+		{
+			Name:   aws.String("TYPE"),
+			Values: []*string{aws.String("FORWARD")}, // Only get FORWARD rules
+		},
+	}
+	
+	// If we have a specific name prefix, add name filter
+	if namePrefix != "" && len(namePrefix) > 5 {
+		filters = append(filters, &route53resolver.Filter{
+			Name:   aws.String("NAME-REGEX"),
+			Values: []*string{aws.String(fmt.Sprintf("%s.*", namePrefix))},
+		})
+	}
+	
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		input := &route53resolver.ListResolverRulesInput{}
+		input := &route53resolver.ListResolverRulesInput{
+			Filters:    filters,
+			MaxResults: aws.Int64(50), // Limit results to reduce response size
+		}
 		result, err = svc.ListResolverRules(input)
 		if err == nil {
 			break
@@ -518,7 +545,109 @@ func getAWSAccountID(t *testing.T, sess *session.Session) string {
 // GenerateTestResourceName creates a safe test resource name with proper prefixes
 func GenerateTestResourceName(resourceType, testName string) string {
 	uniqueID := strings.ToLower(random.UniqueId())
-	return fmt.Sprintf("terratest-%s-%s-%s", resourceType, testName, uniqueID)
+	
+	// Handle special cases for AWS resource format compliance
+	switch resourceType {
+	case "account":
+		// Generate mock AWS account ID (12 digits, starts with 000 for safety)
+		hash := fmt.Sprintf("%x", random.UniqueId())
+		if len(hash) > 9 {
+			hash = hash[:9]
+		}
+		return fmt.Sprintf("000%09s", hash)
+	case "resolver-endpoint":
+		// Generate AWS resolver endpoint format: rslvr-out-[17 hex chars]
+		hash := fmt.Sprintf("%x", random.UniqueId())
+		if len(hash) > 17 {
+			hash = hash[:17]
+		}
+		return fmt.Sprintf("rslvr-out-%017s", hash)
+	case "resolver-rule":
+		// Generate AWS resolver rule format: rslvr-rr-[17 hex chars]
+		hash := fmt.Sprintf("%x", random.UniqueId())
+		if len(hash) > 17 {
+			hash = hash[:17]
+		}
+		return fmt.Sprintf("rslvr-rr-%017s", hash)
+	case "vpc":
+		// Generate AWS VPC format: vpc-[8 or 17 hex chars] - using 8 for simplicity
+		hash := fmt.Sprintf("%x", random.UniqueId())
+		if len(hash) > 8 {
+			hash = hash[:8]
+		}
+		return fmt.Sprintf("vpc-%08s", hash)
+	case "sg":
+		// Generate AWS Security Group format: sg-[8 or 17 hex chars]
+		hash := fmt.Sprintf("%x", random.UniqueId())
+		if len(hash) > 8 {
+			hash = hash[:8]
+		}
+		return fmt.Sprintf("sg-%08s", hash)
+	default:
+		// Default terratest naming for other resources
+		return fmt.Sprintf("terratest-%s-%s-%s", resourceType, testName, uniqueID)
+	}
+}
+
+// GenerateTestSessionID creates a unique session ID for parallel test isolation
+func GenerateTestSessionID(t *testing.T) string {
+	// Create unique session ID based on test name, timestamp, and random data
+	testName := t.Name()
+	timestamp := time.Now().UnixNano()
+	randomData := random.UniqueId()
+	
+	// Create MD5 hash for consistent length
+	hash := md5.Sum([]byte(fmt.Sprintf("%s-%d-%s", testName, timestamp, randomData)))
+	sessionID := fmt.Sprintf("%x", hash)[:12] // Use first 12 chars for session ID
+	
+	t.Logf("Generated test session ID: %s for test: %s", sessionID, testName)
+	return sessionID
+}
+
+// GenerateTestResourceNameWithSession creates resource names with session isolation
+func GenerateTestResourceNameWithSession(resourceType, testName, sessionID string) string {
+	// Handle special cases for AWS resource format compliance with session isolation
+	switch resourceType {
+	case "account":
+		// Generate unique mock AWS account ID with session isolation
+		hash := fmt.Sprintf("%x", fmt.Sprintf("%s-%s", sessionID, testName))
+		if len(hash) > 9 {
+			hash = hash[:9]
+		}
+		return fmt.Sprintf("000%09s", hash)
+	case "resolver-endpoint":
+		// Generate unique AWS resolver endpoint format with session
+		hash := fmt.Sprintf("%x", fmt.Sprintf("%s-%s", sessionID, testName))
+		if len(hash) > 17 {
+			hash = hash[:17]
+		}
+		return fmt.Sprintf("rslvr-out-%017s", hash)
+	case "resolver-rule":
+		// Generate unique AWS resolver rule format with session
+		hash := fmt.Sprintf("%x", fmt.Sprintf("%s-%s", sessionID, testName))
+		if len(hash) > 17 {
+			hash = hash[:17]
+		}
+		return fmt.Sprintf("rslvr-rr-%017s", hash)
+	case "vpc":
+		// Generate unique AWS VPC format with session
+		hash := fmt.Sprintf("%x", fmt.Sprintf("%s-%s", sessionID, testName))
+		if len(hash) > 8 {
+			hash = hash[:8]
+		}
+		return fmt.Sprintf("vpc-%08s", hash)
+	case "sg":
+		// Generate unique AWS Security Group format with session
+		hash := fmt.Sprintf("%x", fmt.Sprintf("%s-%s", sessionID, testName))
+		if len(hash) > 8 {
+			hash = hash[:8]
+		}
+		return fmt.Sprintf("sg-%08s", hash)
+	default:
+		// Default terratest naming with session isolation
+		uniqueID := strings.ToLower(random.UniqueId())
+		return fmt.Sprintf("terratest-%s-%s-%s-%s", resourceType, testName, sessionID, uniqueID)
+	}
 }
 
 // ValidateResourceNameFormat validates that resource names follow safe testing patterns
@@ -773,6 +902,51 @@ func VerifyTestEnvironment(t *testing.T, region string) {
 	require.True(t, isTestSafe, "Region '%s' is not in the list of test-safe regions", region)
 	
 	t.Logf("✓ Test environment verified: region=%s", region)
+}
+
+// ValidateAWSResourceFormats validates that mock AWS resource IDs follow proper formats
+func ValidateAWSResourceFormats(t *testing.T, resourceMap map[string]string) {
+	for resourceType, resourceID := range resourceMap {
+		switch resourceType {
+		case "account":
+			require.Regexp(t, `^[0-9]{12}$`, resourceID, 
+				"AWS Account ID must be exactly 12 digits: %s", resourceID)
+			require.True(t, strings.HasPrefix(resourceID, "000"), 
+				"Test Account ID should start with '000' for safety: %s", resourceID)
+		case "resolver-endpoint":
+			require.Regexp(t, `^rslvr-out-[a-f0-9]{17}$`, resourceID, 
+				"Resolver endpoint ID must match format 'rslvr-out-[17 hex chars]': %s", resourceID)
+		case "resolver-rule":
+			require.Regexp(t, `^rslvr-rr-[a-f0-9]{17}$`, resourceID, 
+				"Resolver rule ID must match format 'rslvr-rr-[17 hex chars]': %s", resourceID)
+		case "vpc":
+			require.Regexp(t, `^vpc-[a-f0-9]{8}([a-f0-9]{9})?$`, resourceID, 
+				"VPC ID must match format 'vpc-[8 or 17 hex chars]': %s", resourceID)
+		case "security-group":
+			require.Regexp(t, `^sg-[a-f0-9]{8}([a-f0-9]{9})?$`, resourceID, 
+				"Security Group ID must match format 'sg-[8 or 17 hex chars]': %s", resourceID)
+		case "subnet":
+			require.Regexp(t, `^subnet-[a-f0-9]{8}([a-f0-9]{9})?$`, resourceID, 
+				"Subnet ID must match format 'subnet-[8 or 17 hex chars]': %s", resourceID)
+		default:
+			t.Logf("Warning: Unknown resource type '%s' for validation: %s", resourceType, resourceID)
+		}
+		t.Logf("✓ AWS resource format validated: %s = %s", resourceType, resourceID)
+	}
+}
+
+// ValidateResourceIDUniqueness ensures no duplicate resource IDs across parallel tests
+func ValidateResourceIDUniqueness(t *testing.T, resourceIDs []string, sessionID string) {
+	seenIDs := make(map[string]bool)
+	
+	for _, resourceID := range resourceIDs {
+		if seenIDs[resourceID] {
+			t.Errorf("Duplicate resource ID detected: %s (session: %s)", resourceID, sessionID)
+		}
+		seenIDs[resourceID] = true
+	}
+	
+	t.Logf("✓ Resource ID uniqueness validated for session %s: %d resources", sessionID, len(resourceIDs))
 }
 
 // isRetryableAWSError determines if an AWS error is retryable

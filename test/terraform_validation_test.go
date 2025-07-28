@@ -580,3 +580,126 @@ func TestTerraformRoute53ResolverRulesEdgeCases(t *testing.T) {
 		})
 	}
 }
+
+// TestTerraformRoute53ResolverRulesAWSResourceFormatValidation tests AWS resource format validation
+func TestTerraformRoute53ResolverRulesAWSResourceFormatValidation(t *testing.T) {
+	t.Parallel()
+
+	awsRegion := awshelper.GetRandomStableRegion(t, nil, nil)
+	
+	// Generate test session ID for isolation
+	sessionID := GenerateTestSessionID(t)
+
+	// Advanced error test cases for AWS resource format validation
+	errorTestCases := []struct {
+		name        string
+		description string
+		vars        map[string]interface{}
+		expectError bool
+		errorText   string
+	}{
+		{
+			name:        "invalid_aws_account_id_format",
+			description: "Test with invalid AWS account ID format (not 12 digits)",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceNameWithSession("resolver-endpoint", "invalid-account", sessionID),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "example.com.",
+						"rule_name":   "invalid-account-rule",
+						"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", "invalid-test", sessionID)},
+						"ips":         []string{"192.168.1.10"},
+						"principals":  []string{"12345"}, // Invalid - not 12 digits
+					},
+				},
+			},
+			expectError: true,
+			errorText:   "account",
+		},
+		{
+			name:        "malformed_resolver_endpoint_id",
+			description: "Test with malformed resolver endpoint ID",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": "invalid-endpoint-format-123", // Invalid format
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "example.com.",
+						"rule_name":   "malformed-endpoint-rule",
+						"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", "invalid-test", sessionID)},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			expectError: true,
+			errorText:   "endpoint",
+		},
+		{
+			name:        "resource_format_validation",
+			description: "Test AWS resource format validation with session isolation",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceNameWithSession("resolver-endpoint", "format-test", sessionID),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "format-test.example.com.",
+						"rule_name":   "format-test-rule",
+						"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", "format-test", sessionID)},
+						"ips":         []string{"192.168.1.10"},
+						"principals":  []string{GenerateTestResourceNameWithSession("account", "format-test", sessionID)},
+					},
+				},
+			},
+			expectError: false, // Should pass with proper formats
+		},
+	}
+
+	for _, tc := range errorTestCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Validate resource formats before running test
+			if !tc.expectError {
+				// Extract resource IDs from test configuration for validation
+				resourceMap := map[string]string{
+					"resolver-endpoint": tc.vars["resolver_endpoint_id"].(string),
+				}
+				
+				if rules, ok := tc.vars["rules"].([]map[string]interface{}); ok && len(rules) > 0 {
+					if vpcIDs, ok := rules[0]["vpc_ids"].([]string); ok && len(vpcIDs) > 0 {
+						resourceMap["vpc"] = vpcIDs[0]
+					}
+					if principals, ok := rules[0]["principals"].([]string); ok && len(principals) > 0 {
+						resourceMap["account"] = principals[0]
+					}
+				}
+				
+				ValidateAWSResourceFormats(t, resourceMap)
+				
+				// Validate resource ID uniqueness
+				resourceIDs := make([]string, 0)
+				for _, resourceID := range resourceMap {
+					resourceIDs = append(resourceIDs, resourceID)
+				}
+				ValidateResourceIDUniqueness(t, resourceIDs, sessionID)
+			}
+
+			terraformOptions := &terraform.Options{
+				TerraformDir: "../",
+				Vars:         tc.vars,
+				EnvVars: map[string]string{
+					"AWS_DEFAULT_REGION": awsRegion,
+				},
+			}
+
+			if tc.expectError {
+				_, err := terraform.InitAndPlanE(t, terraformOptions)
+				assert.Error(t, err, "Expected error for AWS format test: %s", tc.name)
+				if tc.errorText != "" {
+					assert.Contains(t, strings.ToLower(err.Error()), strings.ToLower(tc.errorText),
+						"Error should contain expected text for test: %s", tc.name)
+				}
+				t.Logf("Expected AWS format error handled correctly for: %s - %s", tc.name, tc.description)
+			} else {
+				terraform.InitAndPlan(t, terraformOptions)
+				t.Logf("AWS format validation passed for: %s - %s", tc.name, tc.description)
+			}
+		})
+	}
+}

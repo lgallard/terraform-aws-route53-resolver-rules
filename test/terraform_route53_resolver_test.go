@@ -28,12 +28,25 @@ func TestTerraformRoute53ResolverRulesBasic(t *testing.T) {
 	// Verify test environment safety
 	VerifyTestEnvironment(t, awsRegion)
 
-	// Generate secure test resolver endpoint ID
-	mockEndpointID := GenerateTestResourceName("resolver-endpoint", "basic-test")
-	mockVPCID := GenerateTestResourceName("vpc", "basic-test")
+	// Generate test session ID for parallel test isolation
+	sessionID := GenerateTestSessionID(t)
+
+	// Generate secure test resolver endpoint ID with session isolation
+	mockEndpointID := GenerateTestResourceNameWithSession("resolver-endpoint", "basic-test", sessionID)
+	mockVPCID := GenerateTestResourceNameWithSession("vpc", "basic-test", sessionID)
+	
+	// Validate AWS resource formats
+	resourceMap := map[string]string{
+		"resolver-endpoint": mockEndpointID,
+		"vpc": mockVPCID,
+	}
+	ValidateAWSResourceFormats(t, resourceMap)
 	
 	// Ensure resource isolation
 	EnsureResourceIsolation(t, awsRegion, []string{mockEndpointID, mockVPCID})
+	
+	// Validate resource ID uniqueness
+	ValidateResourceIDUniqueness(t, []string{mockEndpointID, mockVPCID}, sessionID)
 
 	terraformOptions := &terraform.Options{
 		TerraformDir: "../",
