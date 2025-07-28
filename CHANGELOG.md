@@ -5,6 +5,13 @@ FIX:
 * fix(RAM): not working with principals = [] (thanks @astephanh)
 
 * Fix typo
+## [0.4.0](https://github.com/lgallard/terraform-aws-route53-resolver-rules/compare/0.3.0...0.4.0) (2025-07-28)
+
+
+### Features
+
+* add comprehensive Terratest suite for Route53 Resolver rules ([#30](https://github.com/lgallard/terraform-aws-route53-resolver-rules/issues/30)) ([a4251e7](https://github.com/lgallard/terraform-aws-route53-resolver-rules/commit/a4251e761566cef36e74cbc1c02ca53a2ffecd58))
+
 ## [0.3.0](https://github.com/lgallard/terraform-aws-route53-resolver-rules/compare/0.2.0...0.3.0) (2025-07-28)
 
 
