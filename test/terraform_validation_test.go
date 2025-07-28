@@ -245,6 +245,347 @@ func TestTerraformRoute53ResolverRulesValidation(t *testing.T) {
 			ExpectError: true,
 			ErrorText:   "port",
 		},
+		// AWS Service Limits and Quota Error Test Cases
+		{
+			Name:        "invalid_aws_account_id_principals",
+			Description: "Test invalid AWS account ID format in principals (not 12 digits)",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "invalid-account"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "account-test.example.com.",
+						"rule_name":   "invalid-account-rule",
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
+						"ips":         []string{"192.168.1.10"},
+						"principals":  []string{"12345", "not-a-number", "1234567890123"}, // Invalid account formats
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "account",
+		},
+		{
+			Name:        "invalid_resolver_endpoint_format",
+			Description: "Test malformed resolver endpoint ID",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": "invalid-endpoint-format-123", // Wrong format
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "endpoint-test.example.com.",
+						"rule_name":   "invalid-endpoint-rule",
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "endpoint",
+		},
+		{
+			Name:        "invalid_vpc_id_format",
+			Description: "Test malformed VPC ID format",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "invalid-vpc"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "vpc-test.example.com.",
+						"rule_name":   "invalid-vpc-rule",
+						"vpc_ids":     []string{"invalid-vpc-123", "vpc-", "not-a-vpc-id"}, // Invalid VPC formats
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "vpc",
+		},
+		{
+			Name:        "too_many_resolver_rules",
+			Description: "Test exceeding AWS service limits for resolver rules",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "limit-test"),
+				"rules": func() []map[string]interface{} {
+					// Generate 100+ rules to test AWS limits (current limit is usually 100)
+					rules := make([]map[string]interface{}, 105)
+					for i := 0; i < 105; i++ {
+						rules[i] = map[string]interface{}{
+							"domain_name": fmt.Sprintf("limit-test-%d.example.com.", i),
+							"rule_name":   fmt.Sprintf("limit-rule-%d", i),
+							"vpc_ids":     []string{GenerateTestResourceName("vpc", fmt.Sprintf("limit-%d", i))},
+							"ips":         []string{"192.168.1.10"},
+						}
+					}
+					return rules
+				}(),
+			},
+			ExpectError: true,
+			ErrorText:   "limit",
+		},
+		{
+			Name:        "too_many_ram_principals",
+			Description: "Test exceeding RAM sharing principal limits",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "ram-limit"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "ram-limit.example.com.",
+						"rule_name":   "ram-limit-rule",
+						"ram_name":    "ram-limit-share",
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "ram-limit")},
+						"ips":         []string{"192.168.1.10"},
+						"principals": func() []string {
+							// Generate 30+ principals to test RAM limits
+							principals := make([]string, 35)
+							for i := 0; i < 35; i++ {
+								principals[i] = GenerateSequentialAccountID()
+							}
+							return principals
+						}(),
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "principal",
+		},
+		{
+			Name:        "too_many_vpc_associations",
+			Description: "Test exceeding VPC association limits per rule",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "vpc-limit"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "vpc-associations.example.com.",
+						"rule_name":   "vpc-associations-rule",
+						"vpc_ids": func() []string {
+							// Generate 30+ VPC IDs to test association limits
+							vpcs := make([]string, 35)
+							for i := 0; i < 35; i++ {
+								vpcs[i] = GenerateTestResourceName("vpc", fmt.Sprintf("assoc-%d", i))
+							}
+							return vpcs
+						}(),
+						"ips": []string{"192.168.1.10"},
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "association",
+		},
+		// Network and Connectivity Error Test Cases
+		{
+			Name:        "invalid_dns_server_ip",
+			Description: "Test invalid DNS server IP addresses",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "dns-error"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "dns-error.example.com.",
+						"rule_name":   "dns-error-rule",
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "dns-error")},
+						"ips":         []string{"0.0.0.0", "127.0.0.1", "255.255.255.255"}, // Invalid DNS server IPs
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "ip",
+		},
+		{
+			Name:        "mixed_invalid_ips",
+			Description: "Test mix of valid and invalid IP addresses",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "mixed-ip"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "mixed-ip.example.com.",
+						"rule_name":   "mixed-ip-rule",
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "mixed-ip")},
+						"ips":         []string{"192.168.1.10", "999.999.999.999", "192.168.1.11"}, // Mix valid/invalid
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "invalid",
+		},
+		{
+			Name:        "reserved_ip_addresses",
+			Description: "Test using reserved/private IP ranges for DNS servers",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "reserved-ip"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "reserved-ip.example.com.",
+						"rule_name":   "reserved-ip-rule",
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "reserved-ip")},
+						"ips":         []string{"169.254.1.1", "224.0.0.1", "10.0.0.1"}, // Reserved/multicast IPs
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "reserved",
+		},
+		// Resource Reference and Cross-Region Error Test Cases
+		{
+			Name:        "non_existent_vpc_reference",
+			Description: "Test reference to non-existent VPC IDs",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "non-existent"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "non-existent.example.com.",
+						"rule_name":   "non-existent-rule",
+						"vpc_ids":     []string{"vpc-nonexistent123456", "vpc-fakeid987654321"}, // Non-existent but valid format
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "not found",
+		},
+		{
+			Name:        "non_existent_resolver_endpoint",
+			Description: "Test reference to non-existent resolver endpoint",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-nonexistent123456789", // Non-existent but valid format
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "endpoint-ref.example.com.",
+						"rule_name":   "endpoint-ref-rule",
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "endpoint-ref")},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "endpoint",
+		},
+		{
+			Name:        "invalid_ram_resource_name",
+			Description: "Test invalid RAM resource share name format",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "ram-name"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "ram-name.example.com.",
+						"rule_name":   "ram-name-rule",
+						"ram_name":    "invalid ram name with spaces!", // Invalid characters
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "ram-name")},
+						"ips":         []string{"192.168.1.10"},
+						"principals":  []string{GenerateSequentialAccountID()},
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "name",
+		},
+		// Domain Name Validation Error Test Cases
+		{
+			Name:        "domain_name_too_long",
+			Description: "Test domain name exceeding maximum length",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "long-domain"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "this-is-an-extremely-long-domain-name-that-exceeds-the-maximum-allowed-length-for-dns-names-and-should-cause-validation-errors-because-it-is-way-too-long-for-any-reasonable-dns-resolver-to-handle-properly-and-definitely-exceeds-the-253-character-limit-imposed-by-rfc-standards.example.com.", // >253 chars
+						"rule_name":   "long-domain-rule",
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "long-domain")},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "length",
+		},
+		{
+			Name:        "invalid_domain_characters",
+			Description: "Test domain name with invalid characters",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "invalid-chars"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "invalid_domain_with_underscores.example.com.", // Underscores not allowed
+						"rule_name":   "invalid-chars-rule",
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "invalid-chars")},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "character",
+		},
+		{
+			Name:        "empty_domain_name",
+			Description: "Test empty domain name",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "empty-domain"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "", // Empty domain
+						"rule_name":   "empty-domain-rule",
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "empty-domain")},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "empty",
+		},
+		// Configuration Limit Error Test Cases
+		{
+			Name:        "empty_ip_list",
+			Description: "Test resolver rule with empty IP address list",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "empty-ips"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "empty-ips.example.com.",
+						"rule_name":   "empty-ips-rule",
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "empty-ips")},
+						"ips":         []string{}, // Empty IP list
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "ip",
+		},
+		{
+			Name:        "duplicate_vpc_associations",
+			Description: "Test duplicate VPC IDs in the same rule",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "duplicate-vpc"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "duplicate-vpc.example.com.",
+						"rule_name":   "duplicate-vpc-rule",
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "duplicate"), GenerateTestResourceName("vpc", "duplicate")}, // Same VPC twice
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "duplicate",
+		},
+		{
+			Name:        "conflicting_rule_names",
+			Description: "Test duplicate rule names in different rules",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "conflict"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "conflict1.example.com.",
+						"rule_name":   "conflicting-rule", // Same name
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "conflict1")},
+						"ips":         []string{"192.168.1.10"},
+					},
+					{
+						"domain_name": "conflict2.example.com.",
+						"rule_name":   "conflicting-rule", // Same name - should conflict
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "conflict2")},
+						"ips":         []string{"192.168.1.11"},
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "conflict",
+		},
 	}
 
 	for _, tc := range testCases {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/md5"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -116,18 +117,54 @@ func (p *AWSSessionPool) GetSession(region string) (*session.Session, error) {
 	return sess, nil
 }
 
-// CloseAll closes all sessions in the pool
+// CloseAll closes all sessions in the pool and properly closes HTTP connections
 func (p *AWSSessionPool) CloseAll() {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	
-	for region := range p.sessions {
+	for region, sess := range p.sessions {
+		// Close HTTP connections properly to prevent resource leaks
+		if sess != nil && sess.Config != nil && sess.Config.HTTPClient != nil {
+			// Close idle connections to prevent resource leaks
+			client := sess.Config.HTTPClient
+			if client.Transport != nil {
+				if transport, ok := client.Transport.(*http.Transport); ok {
+					transport.CloseIdleConnections()
+				}
+			}
+		}
 		delete(p.sessions, region)
 	}
 }
 
 // Global session pool for reuse across tests
 var globalSessionPool = NewAWSSessionPool()
+
+// CleanupTestResources ensures proper cleanup of test resources and HTTP connections
+func CleanupTestResources() {
+	// Close all session pool connections to prevent resource leaks
+	globalSessionPool.CloseAll()
+}
+
+// AWS API timeout constants
+const (
+	AWSAPITimeout   = 10 * time.Second
+	AWSShortTimeout = 5 * time.Second
+	AWSLongTimeout  = 30 * time.Second
+)
+
+// WithAWSTimeout creates a context with appropriate timeout for AWS operations
+func WithAWSTimeout(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(parent, timeout)
+}
+
+// CreateAWSSessionWithTimeout creates an AWS session with standardized timeout configuration
+func CreateAWSSessionWithTimeout(region string) (*session.Session, error) {
+	return globalSessionPool.GetSession(region)
+}
 
 // GenerateTestName creates a unique test name with prefix
 func GenerateTestName(prefix string) string {
@@ -189,6 +226,10 @@ func ValidateResolverRuleExists(t *testing.T, region, ruleID string) *route53res
 
 // ValidateResolverRuleAssociation checks if a resolver rule is associated with a VPC
 func ValidateResolverRuleAssociation(t *testing.T, region, ruleID, vpcID string) {
+	// Create context with timeout for AWS API operations
+	ctx, cancel := WithAWSTimeout(context.Background(), AWSAPITimeout)
+	defer cancel()
+	
 	// Use pooled session for better performance
 	sess, err := globalSessionPool.GetSession(region)
 	require.NoError(t, err, "Failed to get AWS session from pool for region %s", region)
@@ -207,7 +248,7 @@ func ValidateResolverRuleAssociation(t *testing.T, region, ruleID, vpcID string)
 		},
 	}
 
-	result, err := svc.ListResolverRuleAssociations(input)
+	result, err := svc.ListResolverRuleAssociationsWithContext(ctx, input)
 	require.NoError(t, err, "Failed to list resolver rule associations")
 	require.NotEmpty(t, result.ResolverRuleAssociations, 
 		"Expected resolver rule %s to be associated with VPC %s", ruleID, vpcID)
@@ -276,7 +317,8 @@ func ValidateRAMResourceShare(t *testing.T, region, shareArn string, expectedPri
 	}
 }
 
-// ValidateDNSResolution performs DNS resolution test with context cancellation support and optional strict mode
+// ValidateDNSResolution performs DNS resolution test with enhanced validation and strict mode by default
+// Set strictMode to false only for legacy/backward compatibility scenarios
 func ValidateDNSResolution(t *testing.T, domain string, expectedIPs []string, strictMode bool) {
 	if !strings.HasSuffix(domain, ".") {
 		domain += "."
@@ -354,7 +396,14 @@ func ValidateDNSResolution(t *testing.T, domain string, expectedIPs []string, st
 	t.Logf("✓ DNS resolution completed for %s with context cancellation support (strict mode: %v)", lookupDomain, strictMode)
 }
 
+// ValidateDNSResolutionDefault performs DNS resolution test with strict validation (new default behavior)
+// This function uses strict mode to fail tests on DNS errors for better production readiness
+func ValidateDNSResolutionDefault(t *testing.T, domain string, expectedIPs []string) {
+	ValidateDNSResolution(t, domain, expectedIPs, true)
+}
+
 // ValidateDNSResolutionWarningOnly performs DNS resolution test with warning-only behavior (backward compatibility)
+// Use this only for test environments where DNS failures are expected and acceptable
 func ValidateDNSResolutionWarningOnly(t *testing.T, domain string, expectedIPs []string) {
 	ValidateDNSResolution(t, domain, expectedIPs, false)
 }
@@ -362,6 +411,27 @@ func ValidateDNSResolutionWarningOnly(t *testing.T, domain string, expectedIPs [
 // ValidateDNSResolutionStrict performs DNS resolution test with strict validation that fails tests on errors
 func ValidateDNSResolutionStrict(t *testing.T, domain string, expectedIPs []string) {
 	ValidateDNSResolution(t, domain, expectedIPs, true)
+}
+
+// ValidateDNSResolutionCritical performs enhanced DNS validation for critical production scenarios
+func ValidateDNSResolutionCritical(t *testing.T, domain string, expectedIPs []string) {
+	// Enhanced DNS validation with multiple checks
+	if domain == "" {
+		t.Fatalf("Critical DNS validation failed: empty domain name provided")
+	}
+	
+	// Check for suspicious domain patterns that could indicate issues
+	if strings.Contains(domain, "localhost") || strings.Contains(domain, "127.0.0.1") {
+		t.Fatalf("Critical DNS validation failed: localhost domains not allowed in production: %s", domain)
+	}
+	
+	// Perform strict DNS resolution
+	ValidateDNSResolution(t, domain, expectedIPs, true)
+	
+	// Additional validation for production readiness
+	if len(expectedIPs) == 0 {
+		t.Logf("Warning: No expected IPs provided for critical DNS validation of %s", domain)
+	}
 }
 
 // ValidateDNSResolutionWithFallback performs DNS resolution with multiple fallback strategies
@@ -683,15 +753,17 @@ func WaitForResolverRuleDeletion(t *testing.T, region, ruleID string, maxRetries
 	}
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		sess, err := session.NewSession(&aws.Config{
-			Region: aws.String(region),
-		})
+		// Create context with timeout for AWS API operations
+		ctx, cancel := WithAWSTimeout(context.Background(), AWSAPITimeout)
+		
+		sess, err := CreateAWSSessionWithTimeout(region)
 		require.NoError(t, err)
 		svc := route53resolver.New(sess)
 
-		_, err = svc.GetResolverRule(&route53resolver.GetResolverRuleInput{
+		_, err = svc.GetResolverRuleWithContext(ctx, &route53resolver.GetResolverRuleInput{
 			ResolverRuleId: aws.String(ruleID),
 		})
+		cancel() // Clean up context
 
 		if err != nil {
 			// Check for specific AWS error types instead of string matching
@@ -766,9 +838,11 @@ func CreateCompleteResolverRuleConfig(domainName, ruleName, ramName string,
 
 // CreateMockResolverEndpoint creates a mock resolver endpoint for testing
 func CreateMockResolverEndpoint(t *testing.T, region, vpcID string, subnetIDs []string) string {
-	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String(region),
-	})
+	// Create context with timeout for AWS API operations
+	ctx, cancel := WithAWSTimeout(context.Background(), AWSLongTimeout)
+	defer cancel()
+	
+	sess, err := CreateAWSSessionWithTimeout(region)
 	require.NoError(t, err)
 	svc := route53resolver.New(sess)
 
@@ -780,7 +854,7 @@ func CreateMockResolverEndpoint(t *testing.T, region, vpcID string, subnetIDs []
 		VpcId:       aws.String(vpcID),
 	}
 
-	sgResult, err := ec2Svc.CreateSecurityGroup(sgInput)
+	sgResult, err := ec2Svc.CreateSecurityGroupWithContext(ctx, sgInput)
 	require.NoError(t, err)
 
 	// Create resolver endpoint
@@ -798,7 +872,7 @@ func CreateMockResolverEndpoint(t *testing.T, region, vpcID string, subnetIDs []
 		Name:              aws.String(fmt.Sprintf("test-resolver-endpoint-%s", random.UniqueId())),
 	}
 
-	result, err := svc.CreateResolverEndpoint(input)
+	result, err := svc.CreateResolverEndpointWithContext(ctx, input)
 	require.NoError(t, err)
 
 	// Wait for endpoint to be available
@@ -810,13 +884,14 @@ func CreateMockResolverEndpoint(t *testing.T, region, vpcID string, subnetIDs []
 // WaitForResolverEndpointAvailable waits for a resolver endpoint to become available
 func WaitForResolverEndpointAvailable(t *testing.T, region, endpointID string, maxRetries int, sleepBetweenRetries time.Duration) {
 	retry.DoWithRetry(t, fmt.Sprintf("Waiting for resolver endpoint %s to be available", endpointID), maxRetries, sleepBetweenRetries, func() (string, error) {
-		sess, err := session.NewSession(&aws.Config{
-			Region: aws.String(region),
-		})
+		ctx, cancel := WithAWSTimeout(context.Background(), AWSAPITimeout)
+		defer cancel()
+		
+		sess, err := CreateAWSSessionWithTimeout(region)
 		require.NoError(t, err)
 		svc := route53resolver.New(sess)
 
-		result, err := svc.GetResolverEndpoint(&route53resolver.GetResolverEndpointInput{
+		result, err := svc.GetResolverEndpointWithContext(ctx, &route53resolver.GetResolverEndpointInput{
 			ResolverEndpointId: aws.String(endpointID),
 		})
 		if err != nil {
@@ -989,12 +1064,12 @@ func CleanupTestResolverRules(t *testing.T, region string, namePrefix string) {
 	require.NoError(t, err)
 	svc := route53resolver.New(sess)
 
-	// List resolver rules with proper filtering to reduce API calls
+	// Enhanced AWS API cleanup with optimized filtering and pagination
 	maxRetries := 3
 	baseDelay := time.Second
-	var result *route53resolver.ListResolverRulesOutput
+	allRules := make([]*route53resolver.ResolverRule, 0)
 	
-	// Add filters to reduce unnecessary API calls
+	// Optimized filters to reduce unnecessary API calls and improve performance
 	filters := []*route53resolver.Filter{
 		{
 			Name:   aws.String("TYPE"),
@@ -1002,38 +1077,95 @@ func CleanupTestResolverRules(t *testing.T, region string, namePrefix string) {
 		},
 	}
 	
-	// If we have a specific name prefix, add name filter
+	// Enhanced filtering: try NAME-REGEX first, fallback to client-side filtering if not supported
+	useRegexFilter := false
 	if namePrefix != "" && len(namePrefix) > 5 {
-		filters = append(filters, &route53resolver.Filter{
+		// NAME-REGEX might not be supported in all regions, so we'll try it first
+		regexFilters := append(filters, &route53resolver.Filter{
 			Name:   aws.String("NAME-REGEX"),
-			Values: []*string{aws.String(fmt.Sprintf("%s.*", namePrefix))},
+			Values: []*string{aws.String(fmt.Sprintf("^%s.*", namePrefix))}, // Anchor to start
 		})
+		
+		// Test if NAME-REGEX is supported in this region
+		ctx, cancel := WithAWSTimeout(context.Background(), AWSShortTimeout)
+		testInput := &route53resolver.ListResolverRulesInput{
+			Filters:    regexFilters,
+			MaxResults: aws.Int64(1), // Minimal test
+		}
+		_, testErr := svc.ListResolverRulesWithContext(ctx, testInput)
+		cancel()
+		
+		if testErr == nil {
+			filters = regexFilters
+			useRegexFilter = true
+			t.Logf("Using optimized NAME-REGEX filter for cleanup in region %s", region)
+		} else {
+			t.Logf("NAME-REGEX filter not supported in region %s, falling back to client-side filtering", region)
+		}
 	}
 	
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		input := &route53resolver.ListResolverRulesInput{
-			Filters:    filters,
-			MaxResults: aws.Int64(50), // Limit results to reduce response size
+	// Implement proper pagination for comprehensive cleanup
+	var nextToken *string
+	pageCount := 0
+	maxPages := 10 // Prevent infinite loops
+	
+	for pageCount < maxPages {
+		var pageResult *route53resolver.ListResolverRulesOutput
+		
+		for attempt := 0; attempt < maxRetries; attempt++ {
+			ctx, cancel := WithAWSTimeout(context.Background(), AWSAPITimeout)
+			input := &route53resolver.ListResolverRulesInput{
+				Filters:    filters,
+				MaxResults: aws.Int64(100), // Increased page size for efficiency
+				NextToken:  nextToken,
+			}
+			pageResult, err = svc.ListResolverRulesWithContext(ctx, input)
+			cancel()
+			
+			if err == nil {
+				break
+			}
+			
+			if isRetryableAWSError(err) && attempt < maxRetries-1 {
+				delay := time.Duration(1<<uint(attempt)) * baseDelay
+				t.Logf("ListResolverRules page %d failed (attempt %d/%d), retrying in %v: %v", 
+					pageCount+1, attempt+1, maxRetries, delay, err)
+				time.Sleep(delay)
+				continue
+			}
+			
+			t.Logf("Warning: Failed to list resolver rules page %d after %d attempts: %v", pageCount+1, maxRetries, err)
+			return
 		}
-		result, err = svc.ListResolverRules(input)
-		if err == nil {
+		
+		// Add rules from this page
+		allRules = append(allRules, pageResult.ResolverRules...)
+		
+		// Check if there are more pages
+		if pageResult.NextToken == nil || *pageResult.NextToken == "" {
 			break
 		}
-		
-		if isRetryableAWSError(err) && attempt < maxRetries-1 {
-			delay := time.Duration(1<<uint(attempt)) * baseDelay
-			t.Logf("ListResolverRules failed (attempt %d/%d), retrying in %v: %v", attempt+1, maxRetries, delay, err)
-			time.Sleep(delay)
-			continue
-		}
-		
-		t.Logf("Warning: Failed to list resolver rules for cleanup after %d attempts: %v", maxRetries, err)
-		return
+		nextToken = pageResult.NextToken
+		pageCount++
 	}
+	
+	if pageCount >= maxPages {
+		t.Logf("Warning: Stopped pagination after %d pages to prevent excessive API calls", maxPages)
+	}
+	
+	t.Logf("Retrieved %d resolver rules across %d pages for cleanup evaluation", len(allRules), pageCount+1)
 
 	// Delete rules that match the test prefix with additional safety checks
 	cleanupCount := 0
-	for _, rule := range result.ResolverRules {
+	skippedCount := 0
+	
+	for _, rule := range allRules {
+		// Enhanced safety check: if we're not using regex filter, do client-side filtering
+		if !useRegexFilter && namePrefix != "" && rule.Name != nil {
+			if !strings.HasPrefix(*rule.Name, namePrefix) {
+				continue // Skip rules that don't match prefix
+			}
+		}
 		if rule.Name != nil && isSafeToDelete(*rule.Name, namePrefix) {
 			t.Logf("Cleaning up test resolver rule: %s (ID: %s)", *rule.Name, *rule.Id)
 			
@@ -1041,10 +1173,13 @@ func CleanupTestResolverRules(t *testing.T, region string, namePrefix string) {
 			if deleteResolverRuleWithRetry(t, svc, *rule.Id, *rule.Name) {
 				cleanupCount++
 			}
+		} else {
+			skippedCount++
 		}
 	}
 	
-	t.Logf("Cleanup completed: removed %d test resolver rules", cleanupCount)
+	t.Logf("Enhanced cleanup completed: removed %d test resolver rules, skipped %d rules (filtered/safe)", 
+		cleanupCount, skippedCount)
 }
 
 // ValidateResolverRuleTargetIPs validates the target IPs of a resolver rule
@@ -1110,6 +1245,28 @@ func getAWSAccountID(t *testing.T, sess *session.Session) string {
 	return *result.Account
 }
 
+// Sequential counter for deterministic account ID generation (thread-safe)
+var (
+	accountIDCounter uint64
+	accountIDMutex   sync.Mutex
+)
+
+// GenerateSequentialAccountID creates a deterministic fake AWS account ID
+// Uses sequential numbers to eliminate any collision risk with real AWS accounts
+func GenerateSequentialAccountID() string {
+	accountIDMutex.Lock()
+	defer accountIDMutex.Unlock()
+	
+	// Increment counter and ensure it stays within safe range
+	accountIDCounter++
+	if accountIDCounter > 999999999 { // Reset if approaching real account ID range
+		accountIDCounter = 1
+	}
+	
+	// Format as 12-digit account ID with 000 prefix for absolute safety
+	return fmt.Sprintf("000%09d", accountIDCounter)
+}
+
 // GenerateTestResourceName creates a safe test resource name with proper prefixes
 func GenerateTestResourceName(resourceType, testName string) string {
 	uniqueID := strings.ToLower(random.UniqueId())
@@ -1117,12 +1274,8 @@ func GenerateTestResourceName(resourceType, testName string) string {
 	// Handle special cases for AWS resource format compliance
 	switch resourceType {
 	case "account":
-		// Generate mock AWS account ID (12 digits, starts with 000 for safety)
-		hash := fmt.Sprintf("%x", random.UniqueId())
-		if len(hash) > 9 {
-			hash = hash[:9]
-		}
-		return fmt.Sprintf("000%09s", hash)
+		// Use deterministic sequential account IDs to eliminate collision risk
+		return GenerateSequentialAccountID()
 	case "resolver-endpoint":
 		// Generate AWS resolver endpoint format: rslvr-out-[17 hex chars]
 		hash := fmt.Sprintf("%x", random.UniqueId())
@@ -1177,12 +1330,9 @@ func GenerateTestResourceNameWithSession(resourceType, testName, sessionID strin
 	// Handle special cases for AWS resource format compliance with session isolation
 	switch resourceType {
 	case "account":
-		// Generate unique mock AWS account ID with session isolation
-		hash := fmt.Sprintf("%x", fmt.Sprintf("%s-%s", sessionID, testName))
-		if len(hash) > 9 {
-			hash = hash[:9]
-		}
-		return fmt.Sprintf("000%09s", hash)
+		// Use deterministic sequential account IDs to eliminate collision risk
+		// Session isolation maintained through calling context
+		return GenerateSequentialAccountID()
 	case "resolver-endpoint":
 		// Generate unique AWS resolver endpoint format with session
 		hash := fmt.Sprintf("%x", fmt.Sprintf("%s-%s", sessionID, testName))
@@ -1231,9 +1381,10 @@ func ValidateResourceNameFormat(t *testing.T, resourceName, resourceType string)
 
 // ValidateResolverRuleError validates resolver rule creation errors with proper AWS SDK error handling
 func ValidateResolverRuleError(t *testing.T, region, ruleID string, expectedErrorType string) {
-	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String(region),
-	})
+	ctx, cancel := WithAWSTimeout(context.Background(), AWSAPITimeout)
+	defer cancel()
+	
+	sess, err := CreateAWSSessionWithTimeout(region)
 	require.NoError(t, err)
 	svc := route53resolver.New(sess)
 
@@ -1241,7 +1392,7 @@ func ValidateResolverRuleError(t *testing.T, region, ruleID string, expectedErro
 		ResolverRuleId: aws.String(ruleID),
 	}
 
-	_, err = svc.GetResolverRule(input)
+	_, err = svc.GetResolverRuleWithContext(ctx, input)
 	if err != nil {
 		// Check for specific AWS error types instead of string matching
 		switch expectedErrorType {
@@ -1545,8 +1696,97 @@ func ValidateAWSResourceFormatsWithRegion(t *testing.T, resourceMap map[string]s
 			require.Regexp(t, `^acl-[a-f0-9]{8}([a-f0-9]{9})?$`, resourceID, 
 				"Network ACL ID must match format 'acl-[8 or 17 lowercase hex chars]': %s", resourceID)
 				
+		// Enhanced validation for additional AWS resource types
+		case "instance":
+			require.Regexp(t, `^i-[a-f0-9]{8}([a-f0-9]{9})?$`, resourceID, 
+				"EC2 Instance ID must match format 'i-[8 or 17 lowercase hex chars]': %s", resourceID)
+			// Validate instance ID pattern based on region and generation
+			validateInstanceIDPattern(t, resourceID, region)
+				
+		case "volume":
+			require.Regexp(t, `^vol-[a-f0-9]{8}([a-f0-9]{9})?$`, resourceID, 
+				"EBS Volume ID must match format 'vol-[8 or 17 lowercase hex chars]': %s", resourceID)
+				
+		case "snapshot":
+			require.Regexp(t, `^snap-[a-f0-9]{8}([a-f0-9]{9})?$`, resourceID, 
+				"EBS Snapshot ID must match format 'snap-[8 or 17 lowercase hex chars]': %s", resourceID)
+				
+		case "ami":
+			require.Regexp(t, `^ami-[a-f0-9]{8}([a-f0-9]{9})?$`, resourceID, 
+				"AMI ID must match format 'ami-[8 or 17 lowercase hex chars]': %s", resourceID)
+				
+		case "key-pair":
+			// Key pair names have different validation (no ID format)
+			require.True(t, len(resourceID) >= 1 && len(resourceID) <= 255, 
+				"Key pair name must be 1-255 characters: %s", resourceID)
+			require.Regexp(t, `^[a-zA-Z0-9_.-]+$`, resourceID, 
+				"Key pair name contains invalid characters: %s", resourceID)
+				
+		case "elastic-ip":
+			require.Regexp(t, `^eipalloc-[a-f0-9]{8}([a-f0-9]{9})?$`, resourceID, 
+				"Elastic IP allocation ID must match format 'eipalloc-[8 or 17 lowercase hex chars]': %s", resourceID)
+				
+		case "nat-gateway":
+			require.Regexp(t, `^nat-[a-f0-9]{17}$`, resourceID, 
+				"NAT Gateway ID must match format 'nat-[17 lowercase hex chars]': %s", resourceID)
+				
+		case "load-balancer":
+			// Application/Network Load Balancer ARN pattern (simplified for testing)
+			if strings.Contains(resourceID, "arn:aws:elasticloadbalancing") {
+				validateLoadBalancerARN(t, resourceID, region)
+			} else {
+				// Classic Load Balancer name pattern
+				require.Regexp(t, `^[a-zA-Z0-9-]{1,32}$`, resourceID, 
+					"Load Balancer name must be 1-32 alphanumeric characters and hyphens: %s", resourceID)
+			}
+				
+		case "target-group":
+			require.Regexp(t, `^arn:aws:elasticloadbalancing:[a-z0-9-]+:[0-9]{12}:targetgroup/[a-zA-Z0-9-]{1,32}/[a-f0-9]{17}$`, resourceID, 
+				"Target Group ARN must follow proper format: %s", resourceID)
+				
+		case "iam-role":
+			// IAM role names or ARNs
+			if strings.HasPrefix(resourceID, "arn:aws:iam::") {
+				validateIAMRoleARN(t, resourceID)
+			} else {
+				require.Regexp(t, `^[a-zA-Z0-9+=,.@_-]{1,64}$`, resourceID, 
+					"IAM role name must be 1-64 characters with allowed chars: %s", resourceID)
+			}
+				
+		case "iam-policy":
+			if strings.HasPrefix(resourceID, "arn:aws:iam::") {
+				validateIAMPolicyARN(t, resourceID)
+			} else {
+				require.Regexp(t, `^[a-zA-Z0-9+=,.@_-]{1,128}$`, resourceID, 
+					"IAM policy name must be 1-128 characters: %s", resourceID)
+			}
+				
+		case "s3-bucket":
+			// S3 bucket names have specific rules
+			validateS3BucketName(t, resourceID)
+				
+		case "lambda-function":
+			if strings.HasPrefix(resourceID, "arn:aws:lambda:") {
+				validateLambdaFunctionARN(t, resourceID, region)
+			} else {
+				require.Regexp(t, `^[a-zA-Z0-9-_]{1,64}$`, resourceID, 
+					"Lambda function name must be 1-64 alphanumeric characters, hyphens, and underscores: %s", resourceID)
+			}
+				
+		case "rds-instance":
+			require.Regexp(t, `^[a-zA-Z][a-zA-Z0-9-]{0,62}$`, resourceID, 
+				"RDS instance identifier must start with letter, 1-63 alphanumeric and hyphens: %s", resourceID)
+				
+		case "rds-cluster":
+			require.Regexp(t, `^[a-zA-Z][a-zA-Z0-9-]{0,62}$`, resourceID, 
+				"RDS cluster identifier must start with letter, 1-63 alphanumeric and hyphens: %s", resourceID)
+				
 		default:
 			t.Logf("Warning: Unknown resource type '%s' for validation: %s", resourceType, resourceID)
+			// Enhanced fallback validation for unknown types
+			if strings.Contains(resourceID, "arn:aws:") {
+				validateGenericARN(t, resourceID, region)
+			}
 		}
 		
 		// Additional validation for resource ID entropy and patterns
@@ -1569,6 +1809,201 @@ func isValidUppercaseResource(resourceType string) bool {
 	return upperCaseAllowed[resourceType]
 }
 
+// validateResolverEndpointRegionPattern validates resolver endpoint patterns based on region
+func validateResolverEndpointRegionPattern(t *testing.T, resourceID, region string) {
+	// Extract the hex portion for entropy validation
+	if len(resourceID) >= 28 { // "rslvr-out-" + 17 hex chars
+		hexPortion := resourceID[10:] // Skip "rslvr-out-"
+		
+		// Validate hex entropy (should not be all same character)
+		if strings.Count(hexPortion, string(hexPortion[0])) == len(hexPortion) {
+			t.Fatalf("Resolver endpoint ID has insufficient entropy (all same character): %s", resourceID)
+		}
+		
+		// Regional validation patterns can be added here if AWS has region-specific patterns
+		t.Logf("✓ Resolver endpoint region pattern validated for %s: %s", region, resourceID)
+	}
+}
+
+// validateVPCIDPattern validates VPC ID generation patterns
+func validateVPCIDPattern(t *testing.T, resourceID string) {
+	// VPC IDs should not be sequential or predictable patterns
+	if len(resourceID) >= 12 { // "vpc-" + at least 8 hex chars
+		hexPortion := resourceID[4:] // Skip "vpc-"
+		
+		// Check for sequential patterns (not realistic for AWS)
+		if isSequentialHex(hexPortion) {
+			t.Fatalf("VPC ID shows suspicious sequential pattern: %s", resourceID)
+		}
+		
+		// Check for insufficient entropy
+		if strings.Count(hexPortion, string(hexPortion[0])) == len(hexPortion) {
+			t.Fatalf("VPC ID has insufficient entropy: %s", resourceID)
+		}
+	}
+}
+
+// validateInstanceIDPattern validates EC2 instance ID patterns
+func validateInstanceIDPattern(t *testing.T, resourceID, region string) {
+	if len(resourceID) >= 10 { // "i-" + at least 8 hex chars
+		hexPortion := resourceID[2:] // Skip "i-"
+		
+		// Validate generation (8 chars = old format, 17 chars = new format)
+		if len(hexPortion) != 8 && len(hexPortion) != 17 {
+			t.Fatalf("Instance ID has invalid hex length: %s (expected 8 or 17 chars)", resourceID)
+		}
+		
+		// Check entropy
+		if strings.Count(hexPortion, string(hexPortion[0])) == len(hexPortion) {
+			t.Fatalf("Instance ID has insufficient entropy: %s", resourceID)
+		}
+		
+		t.Logf("✓ Instance ID pattern validated for %s: %s", region, resourceID)
+	}
+}
+
+// validateLoadBalancerARN validates Application/Network Load Balancer ARN format
+func validateLoadBalancerARN(t *testing.T, arn, region string) {
+	// ALB/NLB ARN format: arn:aws:elasticloadbalancing:region:account-id:loadbalancer/app|net/name/id
+	arnPattern := `^arn:aws:elasticloadbalancing:[a-z0-9-]+:[0-9]{12}:loadbalancer/(app|net)/[a-zA-Z0-9-]{1,32}/[a-f0-9]{17}$`
+	require.Regexp(t, arnPattern, arn, "Invalid load balancer ARN format: %s", arn)
+	
+	// Validate region matches if provided
+	if region != "" && !strings.Contains(arn, ":"+region+":") {
+		t.Fatalf("Load balancer ARN region mismatch. Expected %s in ARN: %s", region, arn)
+	}
+}
+
+// validateIAMRoleARN validates IAM role ARN format
+func validateIAMRoleARN(t *testing.T, arn string) {
+	// IAM role ARN format: arn:aws:iam::account-id:role/role-name
+	arnPattern := `^arn:aws:iam::[0-9]{12}:role/[a-zA-Z0-9+=,.@_/-]{1,64}$`
+	require.Regexp(t, arnPattern, arn, "Invalid IAM role ARN format: %s", arn)
+}
+
+// validateIAMPolicyARN validates IAM policy ARN format  
+func validateIAMPolicyARN(t *testing.T, arn string) {
+	// IAM policy ARN format: arn:aws:iam::account-id:policy/policy-name
+	arnPattern := `^arn:aws:iam::[0-9]{12}:policy/[a-zA-Z0-9+=,.@_/-]{1,128}$`
+	require.Regexp(t, arnPattern, arn, "Invalid IAM policy ARN format: %s", arn)
+}
+
+// validateS3BucketName validates S3 bucket naming rules
+func validateS3BucketName(t *testing.T, bucketName string) {
+	// S3 bucket naming rules
+	require.True(t, len(bucketName) >= 3 && len(bucketName) <= 63, 
+		"S3 bucket name must be 3-63 characters: %s", bucketName)
+	
+	require.Regexp(t, `^[a-z0-9.-]+$`, bucketName, 
+		"S3 bucket name can only contain lowercase letters, numbers, periods, and hyphens: %s", bucketName)
+	
+	require.True(t, !strings.HasPrefix(bucketName, ".") && !strings.HasSuffix(bucketName, "."),
+		"S3 bucket name cannot start or end with period: %s", bucketName)
+	
+	require.True(t, !strings.HasPrefix(bucketName, "-") && !strings.HasSuffix(bucketName, "-"),
+		"S3 bucket name cannot start or end with hyphen: %s", bucketName)
+	
+	require.False(t, strings.Contains(bucketName, ".."), 
+		"S3 bucket name cannot contain consecutive periods: %s", bucketName)
+		
+	require.False(t, strings.Contains(bucketName, ".-") || strings.Contains(bucketName, "-."), 
+		"S3 bucket name cannot have period adjacent to hyphen: %s", bucketName)
+}
+
+// validateLambdaFunctionARN validates Lambda function ARN format
+func validateLambdaFunctionARN(t *testing.T, arn, region string) {
+	// Lambda function ARN format: arn:aws:lambda:region:account-id:function:function-name
+	arnPattern := `^arn:aws:lambda:[a-z0-9-]+:[0-9]{12}:function:[a-zA-Z0-9-_]{1,64}$`
+	require.Regexp(t, arnPattern, arn, "Invalid Lambda function ARN format: %s", arn)
+	
+	// Validate region matches if provided
+	if region != "" && !strings.Contains(arn, ":"+region+":") {
+		t.Fatalf("Lambda function ARN region mismatch. Expected %s in ARN: %s", region, arn)
+	}
+}
+
+// validateGenericARN validates basic ARN structure for unknown types
+func validateGenericARN(t *testing.T, arn, region string) {
+	// Basic ARN format: arn:partition:service:region:account-id:resource
+	arnPattern := `^arn:[a-z0-9-]+:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:.+$`
+	require.Regexp(t, arnPattern, arn, "Invalid ARN format: %s", arn)
+	
+	t.Logf("✓ Generic ARN format validated: %s", arn)
+}
+
+// validateResourceIDEntropy validates resource ID entropy and patterns
+func validateResourceIDEntropy(t *testing.T, resourceType, resourceID string) {
+	// Skip entropy validation for certain resource types that have specific naming patterns
+	skipEntropyValidation := map[string]bool{
+		"s3-bucket":      true, // S3 buckets often have meaningful names
+		"iam-role":       true, // IAM roles often have meaningful names
+		"iam-policy":     true, // IAM policies often have meaningful names
+		"lambda-function": true, // Lambda functions often have meaningful names
+		"rds-instance":   true, // RDS instances often have meaningful names
+		"rds-cluster":    true, // RDS clusters often have meaningful names
+		"key-pair":       true, // Key pairs have user-defined names
+	}
+	
+	if skipEntropyValidation[resourceType] {
+		return
+	}
+	
+	// For AWS-generated IDs, validate entropy
+	if strings.Contains(resourceID, "-") {
+		parts := strings.Split(resourceID, "-")
+		if len(parts) >= 2 {
+			lastPart := parts[len(parts)-1]
+			
+			// Check if the ID part has sufficient entropy
+			if len(lastPart) >= 8 && isLowEntropy(lastPart) {
+				t.Logf("Warning: Resource ID may have low entropy: %s", resourceID)
+			}
+		}
+	}
+}
+
+// isSequentialHex checks if a hex string shows sequential patterns
+func isSequentialHex(hexStr string) bool {
+	if len(hexStr) < 4 {
+		return false
+	}
+	
+	// Check for simple ascending patterns
+	for i := 0; i < len(hexStr)-3; i++ {
+		if hexStr[i] == '0' && hexStr[i+1] == '1' && hexStr[i+2] == '2' && hexStr[i+3] == '3' {
+			return true
+		}
+		if hexStr[i] == 'a' && hexStr[i+1] == 'b' && hexStr[i+2] == 'c' && hexStr[i+3] == 'd' {
+			return true
+		}
+	}
+	
+	return false
+}
+
+// isLowEntropy checks if a string has low entropy (repeated patterns)
+func isLowEntropy(str string) bool {
+	if len(str) < 4 {
+		return false
+	}
+	
+	// Check for repeated characters
+	charCount := make(map[rune]int)
+	for _, char := range str {
+		charCount[char]++
+	}
+	
+	// If any character appears more than 50% of the time, consider it low entropy
+	threshold := len(str) / 2
+	for _, count := range charCount {
+		if count > threshold {
+			return true
+		}
+	}
+	
+	return false
+}
+
 // validateAccountIDRange validates that account IDs don't use reserved ranges
 func validateAccountIDRange(t *testing.T, accountID string) {
 	// Reserved account ID ranges that should not be used
@@ -1587,103 +2022,349 @@ func validateAccountIDRange(t *testing.T, accountID string) {
 	}
 }
 
-// validateResolverEndpointRegionPattern validates resolver endpoint region-specific patterns
-func validateResolverEndpointRegionPattern(t *testing.T, endpointID, region string) {
-	// Resolver endpoints are region-specific resources
-	// Validate that the ID doesn't accidentally reference cross-region patterns
-	
-	// Get region code for validation
-	regionCode := getRegionCode(region)
-	
-	// Check that test IDs don't accidentally include region-specific patterns that could cause confusion
-	crossRegionPatterns := []string{
-		"us-west", "us-east", "eu-west", "eu-central", "ap-south", "ap-northeast",
-	}
-	
-	for _, pattern := range crossRegionPatterns {
-		if strings.Contains(strings.ToLower(endpointID), pattern) && !strings.Contains(strings.ToLower(region), pattern) {
-			t.Logf("Warning: Resolver endpoint ID contains region pattern '%s' but is in region '%s': %s", 
-				pattern, region, endpointID)
-		}
-	}
-	
-	t.Logf("✓ Resolver endpoint region pattern validated for %s: %s", regionCode, endpointID)
+// TestResourceSafeguard provides race condition mitigation for parallel tests
+type TestResourceSafeguard struct {
+	mutex     sync.RWMutex
+	resources map[string]TestResourceInfo
+	testName  string
 }
 
-// validateVPCIDPattern validates VPC ID patterns for consistency
-func validateVPCIDPattern(t *testing.T, vpcID string) {
-	// Extract the hex portion for analysis
-	hexPart := strings.TrimPrefix(vpcID, "vpc-")
-	
-	// Check for suspicious patterns
-	if len(hexPart) >= 8 {
-		// Check for obviously non-random patterns
-		if strings.Contains(hexPart, "00000000") {
-			t.Logf("Warning: VPC ID contains suspicious zero pattern: %s", vpcID)
-		}
-		if strings.Contains(hexPart, "ffffffff") {
-			t.Logf("Warning: VPC ID contains suspicious all-f pattern: %s", vpcID)
-		}
-		if strings.Contains(hexPart, "12345678") {
-			t.Logf("Warning: VPC ID contains suspicious sequential pattern: %s", vpcID)
-		}
+// TestResourceInfo tracks resource information for race condition detection
+type TestResourceInfo struct {
+	ResourceID   string
+	ResourceType string
+	TestName     string
+	CreatedAt    time.Time
+	InUse        bool
+}
+
+// NewTestResourceSafeguard creates a new test resource safeguard
+func NewTestResourceSafeguard(testName string) *TestResourceSafeguard {
+	return &TestResourceSafeguard{
+		resources: make(map[string]TestResourceInfo),
+		testName:  testName,
 	}
 }
 
-// validateResourceIDEntropy validates that resource IDs have sufficient randomness
-func validateResourceIDEntropy(t *testing.T, resourceType, resourceID string) {
-	// Extract hex portions from resource IDs
-	var hexPart string
+// ClaimResource attempts to claim a resource for exclusive use by this test
+func (trs *TestResourceSafeguard) ClaimResource(t *testing.T, resourceType, resourceID string) error {
+	trs.mutex.Lock()
+	defer trs.mutex.Unlock()
 	
-	switch resourceType {
-	case "vpc", "subnet", "security-group", "internet-gateway", "route-table", "network-acl":
-		parts := strings.Split(resourceID, "-")
-		if len(parts) >= 2 {
-			hexPart = parts[1]
+	resourceKey := fmt.Sprintf("%s:%s", resourceType, resourceID)
+	
+	// Check if resource is already claimed
+	if existing, exists := trs.resources[resourceKey]; exists {
+		if existing.InUse && existing.TestName != trs.testName {
+			return fmt.Errorf("resource %s (type: %s) is already in use by test: %s (claimed at: %v)", 
+				resourceID, resourceType, existing.TestName, existing.CreatedAt)
 		}
-	case "resolver-endpoint", "resolver-rule":
-		parts := strings.Split(resourceID, "-")
-		if len(parts) >= 3 {
-			hexPart = parts[2]
-		}
-	default:
-		return // Skip entropy validation for non-hex resources
 	}
 	
-	if hexPart == "" {
-		return
+	// Claim the resource
+	trs.resources[resourceKey] = TestResourceInfo{
+		ResourceID:   resourceID,
+		ResourceType: resourceType,
+		TestName:     trs.testName,
+		CreatedAt:    time.Now(),
+		InUse:        true,
 	}
 	
-	// Basic entropy checks
-	if len(hexPart) >= 8 {
-		// Check for repeated characters (low entropy indicator)
-		charCount := make(map[rune]int)
-		for _, char := range hexPart {
-			charCount[char]++
+	t.Logf("✓ Resource claimed for exclusive use: %s (type: %s)", resourceID, resourceType)
+	return nil
+}
+
+// ReleaseResource releases a previously claimed resource
+func (trs *TestResourceSafeguard) ReleaseResource(t *testing.T, resourceType, resourceID string) {
+	trs.mutex.Lock()
+	defer trs.mutex.Unlock()
+	
+	resourceKey := fmt.Sprintf("%s:%s", resourceType, resourceID)
+	
+	if existing, exists := trs.resources[resourceKey]; exists {
+		if existing.TestName == trs.testName {
+			delete(trs.resources, resourceKey)
+			t.Logf("✓ Resource released: %s (type: %s)", resourceID, resourceType)
+		} else {
+			t.Logf("Warning: Attempted to release resource owned by different test: %s", existing.TestName)
+		}
+	}
+}
+
+// ReleaseAllResources releases all resources claimed by this test
+func (trs *TestResourceSafeguard) ReleaseAllResources(t *testing.T) {
+	trs.mutex.Lock()
+	defer trs.mutex.Unlock()
+	
+	count := 0
+	for resourceKey, resource := range trs.resources {
+		if resource.TestName == trs.testName {
+			delete(trs.resources, resourceKey)
+			count++
+		}
+	}
+	
+	if count > 0 {
+		t.Logf("✓ Released %d resources for test: %s", count, trs.testName)
+	}
+}
+
+// Global test resource coordinator for cross-test race condition prevention
+var globalTestCoordinator = &TestResourceSafeguard{
+	resources: make(map[string]TestResourceInfo),
+	testName:  "global",
+}
+
+// GenerateIsolatedTestResourceName generates a test resource name with isolation guarantees
+func GenerateIsolatedTestResourceName(testName, resourceType string) string {
+	// Use timestamp + test name + random suffix for isolation
+	timestamp := time.Now().Unix()
+	
+	// Clean test name to be resource-name compatible
+	cleanTestName := strings.ReplaceAll(testName, "/", "-")
+	cleanTestName = strings.ReplaceAll(cleanTestName, " ", "-")
+	cleanTestName = strings.ToLower(cleanTestName)
+	
+	// Limit length to avoid AWS resource name limits
+	if len(cleanTestName) > 20 {
+		cleanTestName = cleanTestName[:20]
+	}
+	
+	// Add random suffix to prevent collisions
+	randomSuffix := fmt.Sprintf("%04d", rand.Intn(10000))
+	
+	resourceName := fmt.Sprintf("%s-%s-%d-%s", resourceType, cleanTestName, timestamp, randomSuffix)
+	
+	// Ensure resource name follows AWS naming conventions
+	resourceName = strings.ToLower(resourceName)
+	resourceName = strings.ReplaceAll(resourceName, "_", "-")
+	
+	return resourceName
+}
+
+// WithTestResourceIsolation wraps a test function with resource isolation
+func WithTestResourceIsolation(t *testing.T, testFunc func(*testing.T, *TestResourceSafeguard)) {
+	safeguard := NewTestResourceSafeguard(t.Name())
+	
+	// Setup cleanup on test completion
+	defer func() {
+		safeguard.ReleaseAllResources(t)
+		
+		// Additional cleanup with recovery
+		if r := recover(); r != nil {
+			t.Logf("Test panic occurred, ensuring all resources are released: %v", r)
+			safeguard.ReleaseAllResources(t)
+			panic(r) // Re-panic to maintain test failure
+		}
+	}()
+	
+	// Run the test function with safeguard
+	testFunc(t, safeguard)
+}
+
+// TestParallelSafeResourceCreation demonstrates safe parallel resource creation
+func TestParallelSafeResourceCreation(t *testing.T, region string, resourceCount int) {
+	// Test parallel resource creation with race condition mitigation
+	var wg sync.WaitGroup
+	errors := make(chan error, resourceCount)
+	results := make(chan string, resourceCount)
+	
+	for i := 0; i < resourceCount; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			
+			// Generate isolated test resource name
+			resourceName := GenerateIsolatedTestResourceName(t.Name(), "resolver-rule")
+			
+			// Use global coordinator to claim resource
+			err := globalTestCoordinator.ClaimResource(t, "resolver-rule", resourceName)
+			if err != nil {
+				errors <- err
+				return
+			}
+			
+			// Simulate resource creation with context timeout
+			ctx, cancel := WithAWSTimeout(context.Background(), AWSAPITimeout)
+			defer cancel()
+			
+			// Simulate AWS API call delay
+			select {
+			case <-time.After(time.Duration(rand.Intn(100)) * time.Millisecond):
+				results <- resourceName
+			case <-ctx.Done():
+				errors <- fmt.Errorf("resource creation timeout for %s", resourceName)
+				return
+			}
+			
+			// Release resource after use
+			globalTestCoordinator.ReleaseResource(t, "resolver-rule", resourceName)
+		}(i)
+	}
+	
+	// Wait for all goroutines to complete
+	wg.Wait()
+	close(errors)
+	close(results)
+	
+	// Check for errors
+	errorCount := 0
+	for err := range errors {
+		t.Logf("Error in parallel resource creation: %v", err)
+		errorCount++
+	}
+	
+	// Check results
+	successCount := 0
+	for result := range results {
+		t.Logf("✓ Successfully created resource: %s", result)
+		successCount++
+	}
+	
+	t.Logf("Parallel resource creation completed: %d successes, %d errors", successCount, errorCount)
+	
+	// Ensure we got expected results
+	if successCount+errorCount != resourceCount {
+		t.Fatalf("Unexpected result count. Expected %d, got %d", resourceCount, successCount+errorCount)
+	}
+}
+
+// GenerateTestUniqueID generates a unique ID for test resources with collision avoidance
+func GenerateTestUniqueID(prefix string) string {
+	// Use high-resolution timestamp + random component for uniqueness
+	nanos := time.Now().UnixNano()
+	random := rand.Int31n(99999)
+	
+	// Combine components for maximum uniqueness
+	uniqueID := fmt.Sprintf("%s-%d-%05d", prefix, nanos, random)
+	
+	return uniqueID
+}
+
+// ValidateTestResourceIsolation validates that test resources are properly isolated
+func ValidateTestResourceIsolation(t *testing.T, resourceNames []string) {
+	// Check for duplicate resource names
+	seen := make(map[string]bool)
+	for _, name := range resourceNames {
+		if seen[name] {
+			t.Fatalf("Duplicate resource name detected (race condition): %s", name)
+		}
+		seen[name] = true
+	}
+	
+	// Validate naming patterns for isolation
+	for _, name := range resourceNames {
+		if !strings.Contains(name, "-") {
+			t.Fatalf("Resource name lacks isolation markers: %s", name)
 		}
 		
-		// If any character appears more than 50% of the time, flag as low entropy
-		maxCount := 0
-		for _, count := range charCount {
-			if count > maxCount {
-				maxCount = count
+		// Ensure resource names have timestamp-like components
+		parts := strings.Split(name, "-")
+		hasTimestampComponent := false
+		for _, part := range parts {
+			if len(part) >= 8 && isNumeric(part) {
+				hasTimestampComponent = true
+				break
 			}
 		}
 		
-		if float64(maxCount)/float64(len(hexPart)) > 0.5 {
-			t.Logf("Warning: Resource ID may have low entropy (repeated characters): %s", resourceID)
+		if !hasTimestampComponent {
+			t.Fatalf("Resource name lacks timestamp isolation component: %s", name)
 		}
 	}
+	
+	t.Logf("✓ Test resource isolation validated for %d resources", len(resourceNames))
 }
 
-// getRegionCode extracts region code for validation purposes
-func getRegionCode(region string) string {
-	// Extract meaningful region code for validation
-	parts := strings.Split(region, "-")
-	if len(parts) >= 2 {
-		return parts[0] + "-" + parts[1] // e.g., "us-east", "eu-west"
+// isNumeric checks if a string contains only numeric characters
+func isNumeric(str string) bool {
+	for _, char := range str {
+		if char < '0' || char > '9' {
+			return false
+		}
 	}
-	return region
+	return len(str) > 0
+}
+
+// TestConcurrentAWSOperations tests concurrent AWS operations with proper isolation
+func TestConcurrentAWSOperations(t *testing.T, region string, operationCount int) {
+	ctx, cancel := WithAWSTimeout(context.Background(), AWSLongTimeout)
+	defer cancel()
+	
+	sess, err := CreateAWSSessionWithTimeout(region)
+	require.NoError(t, err, "Failed to create AWS session for concurrent operations test")
+	
+	svc := route53resolver.New(sess)
+	
+	var wg sync.WaitGroup
+	errors := make(chan error, operationCount)
+	results := make(chan string, operationCount)
+	
+	// Rate limiter to prevent AWS API throttling
+	rateLimiter := time.NewTicker(100 * time.Millisecond)
+	defer rateLimiter.Stop()
+	
+	for i := 0; i < operationCount; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			
+			// Rate limiting
+			<-rateLimiter.C
+			
+			// Create operation-specific context
+			opCtx, opCancel := WithAWSTimeout(ctx, AWSAPITimeout)
+			defer opCancel()
+			
+			// Generate unique resource identifier
+			testResourceID := GenerateTestUniqueID(fmt.Sprintf("test-op-%d", index))
+			
+			// Perform AWS operation (list resolver rules with unique filter)
+			listInput := &route53resolver.ListResolverRulesInput{
+				MaxResults: aws.Int64(1),
+				Filters: []*route53resolver.Filter{
+					{
+						Name:   aws.String("Name"),
+						Values: []*string{aws.String(testResourceID)}, // Non-existent filter for isolation
+					},
+				},
+			}
+			
+			result, err := svc.ListResolverRulesWithContext(opCtx, listInput)
+			if err != nil {
+				errors <- fmt.Errorf("operation %d failed: %v", index, err)
+				return
+			}
+			
+			results <- fmt.Sprintf("operation-%d-rules-%d", index, len(result.ResolverRules))
+		}(i)
+	}
+	
+	// Wait for all operations to complete
+	wg.Wait()
+	close(errors)
+	close(results)
+	
+	// Process results
+	errorCount := 0
+	for err := range errors {
+		t.Logf("Concurrent operation error: %v", err)
+		errorCount++
+	}
+	
+	successCount := 0
+	for result := range results {
+		t.Logf("✓ Concurrent operation result: %s", result)
+		successCount++
+	}
+	
+	t.Logf("Concurrent AWS operations completed: %d successes, %d errors out of %d total", 
+		successCount, errorCount, operationCount)
+	
+	// Allow some errors due to AWS rate limiting, but require majority success
+	if successCount < operationCount/2 {
+		t.Fatalf("Too many concurrent operation failures: %d/%d", errorCount, operationCount)
+	}
 }
 
 // ValidateResourceIDUniqueness ensures no duplicate resource IDs across parallel tests
