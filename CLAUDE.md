@@ -269,7 +269,7 @@ variable "rules" {
     condition = alltrue([
       for rule in var.rules : alltrue([
         for ip in rule.ips : 
-        can(regex("^(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?::[1-9][0-9]{0,4})?$", ip))
+        can(regex("^(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?::[1-9]|[1-9][0-9]|[1-9][0-9]{2}|[1-9][0-9]{3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])?$", ip))
       ])
     ])
     error_message = "IP addresses must be in valid IPv4 format, optionally with port (e.g., '192.168.1.1' or '192.168.1.1:5353')."
@@ -585,13 +585,8 @@ variable "trusted_principals" {
     error_message = "Principal IDs must be exactly 12 digits (AWS account IDs)."
   }
 
-  validation {
-    condition = alltrue([
-      for account in var.trusted_principals : 
-      account != data.aws_caller_identity.current.account_id
-    ])
-    error_message = "Cannot share resources with the same account."
-  }
+  # Note: Additional validation for same-account sharing should be implemented
+  # at the resource level using locals or data sources within the module context
 }
 
 # Prevent sharing with external principals
@@ -686,21 +681,27 @@ locals {
 
   # Optimized single-pass flattening for VPC and RAM associations
   vpcs_associations = {
-    for rule in var.rules :
-    for vpc in lookup(rule, "vpc_ids") :
-    "${lookup(rule, "domain_name")}-${vpc}" => {
-      vpc_id      = vpc
-      domain_name = lookup(rule, "domain_name")
-    }
+    for pair in flatten([
+      for rule in var.rules : [
+        for vpc in rule.vpc_ids : {
+          key         = "${rule.domain_name}-${vpc}"
+          vpc_id      = vpc
+          domain_name = rule.domain_name
+        }
+      ]
+    ]) : pair.key => pair
   }
 
   ram_associations = {
-    for rule in var.rules :
-    for principal in lookup(rule, "principals", []) :
-    "${lookup(rule, "domain_name")}-${principal}" => {
-      principal_id = principal
-      ram_name     = lookup(rule, "ram_name", lookup(rule, "domain_name"))
-    }
+    for pair in flatten([
+      for rule in var.rules : [
+        for principal in rule.principals : {
+          key          = "${rule.domain_name}-${principal}"
+          principal_id = principal
+          ram_name     = coalesce(rule.ram_name, rule.domain_name)
+        }
+      ] if length(rule.principals) > 0
+    ]) : pair.key => pair
   }
 }
 ```
@@ -711,10 +712,7 @@ locals {
 ```hcl
 # Use for_each for safer resource creation
 resource "aws_route53_resolver_rule_association" "ra" {
-  for_each = {
-    for idx, assoc in local.vpcs_associations : 
-    "${assoc.domain_name}-${assoc.vpc_id}" => assoc
-  }
+  for_each = local.vpcs_associations
   
   resolver_rule_id = aws_route53_resolver_rule.r[each.value.domain_name].id
   vpc_id          = each.value.vpc_id
