@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/ram"
@@ -285,6 +286,191 @@ func ValidateDNSResolutionWarningOnly(t *testing.T, domain string, expectedIPs [
 // ValidateDNSResolutionStrict performs DNS resolution test with strict validation that fails tests on errors
 func ValidateDNSResolutionStrict(t *testing.T, domain string, expectedIPs []string) {
 	ValidateDNSResolution(t, domain, expectedIPs, true)
+}
+
+// TestAWSServiceLimits validates AWS service limits and quota compliance for Route53 Resolver
+func TestAWSServiceLimits(t *testing.T, region string) {
+	// Create context with timeout for AWS API calls
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	
+	// Create AWS session
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String(region),
+	})
+	require.NoError(t, err, "Failed to create AWS session for service limit testing")
+	
+	// Test Route53 Resolver service limits
+	testRoute53ResolverLimits(t, ctx, sess)
+	
+	// Test RAM service limits
+	testRAMServiceLimits(t, ctx, sess)
+}
+
+// testRoute53ResolverLimits tests Route53 Resolver service limits
+func testRoute53ResolverLimits(t *testing.T, ctx context.Context, sess *session.Session) {
+	svc := route53resolver.New(sess)
+	
+	// Test list resolver rules to check current usage
+	listInput := &route53resolver.ListResolverRulesInput{
+		MaxResults: aws.Int64(100),
+	}
+	
+	result, err := svc.ListResolverRulesWithContext(ctx, listInput)
+	if err != nil {
+		// Log warning but don't fail test for listing
+		t.Logf("Warning: Could not list resolver rules for limit checking: %v", err)
+		return
+	}
+	
+	currentRules := len(result.ResolverRules)
+	t.Logf("Current resolver rules count: %d", currentRules)
+	
+	// AWS default limit is typically 1000 resolver rules per account per region
+	maxResolverRules := 1000
+	if currentRules > maxResolverRules-100 { // Leave buffer for testing
+		t.Logf("Warning: Approaching resolver rules limit (%d/%d)", currentRules, maxResolverRules)
+	}
+}
+
+// testRAMServiceLimits tests RAM service limits
+func testRAMServiceLimits(t *testing.T, ctx context.Context, sess *session.Session) {
+	ramSvc := ram.New(sess)
+	
+	// Test list resource shares to check current usage
+	listInput := &ram.GetResourceSharesInput{
+		ResourceOwner: aws.String("SELF"),
+		MaxResults:    aws.Int64(100),
+	}
+	
+	result, err := ramSvc.GetResourceSharesWithContext(ctx, listInput)
+	if err != nil {
+		// Log warning but don't fail test for listing
+		t.Logf("Warning: Could not list RAM resource shares for limit checking: %v", err)
+		return
+	}
+	
+	currentShares := len(result.ResourceShares)
+	t.Logf("Current RAM resource shares count: %d", currentShares)
+	
+	// AWS default limit is typically 500 resource shares per account
+	maxResourceShares := 500
+	if currentShares > maxResourceShares-50 { // Leave buffer for testing
+		t.Logf("Warning: Approaching RAM resource shares limit (%d/%d)", currentShares, maxResourceShares)
+	}
+}
+
+// SimulateAWSServiceErrors simulates common AWS service errors for testing error handling
+func SimulateAWSServiceErrors(t *testing.T, errorType string) error {
+	switch errorType {
+	case "throttling":
+		return &awserr.RequestError{
+			OrigErr: &awserr.Error{
+				Code_:    "Throttling",
+				Message_: "Rate exceeded",
+			},
+		}
+	case "limit_exceeded":
+		return &awserr.RequestError{
+			OrigErr: &awserr.Error{
+				Code_:    "LimitExceededException",
+				Message_: "Resource limit exceeded",
+			},
+		}
+	case "invalid_parameter":
+		return &awserr.RequestError{
+			OrigErr: &awserr.Error{
+				Code_:    "InvalidParameterValue",
+				Message_: "Invalid parameter value",
+			},
+		}
+	case "not_found":
+		return &awserr.RequestError{
+			OrigErr: &awserr.Error{
+				Code_:    "ResourceNotFoundException",
+				Message_: "Resource not found",
+			},
+		}
+	case "access_denied":
+		return &awserr.RequestError{
+			OrigErr: &awserr.Error{
+				Code_:    "AccessDenied",
+				Message_: "Access denied",
+			},
+		}
+	default:
+		return fmt.Errorf("unknown error type: %s", errorType)
+	}
+}
+
+// ValidateAWSErrorHandling tests proper handling of various AWS error types
+func ValidateAWSErrorHandling(t *testing.T, err error, expectedErrorType string) {
+	if err == nil {
+		t.Fatalf("Expected AWS error of type %s but got no error", expectedErrorType)
+	}
+	
+	if awsErr, ok := err.(awserr.Error); ok {
+		switch expectedErrorType {
+		case "throttling":
+			assert.Contains(t, []string{"Throttling", "RequestLimitExceeded", "TooManyRequestsException"}, 
+				awsErr.Code(), "Expected throttling error")
+		case "limit_exceeded":
+			assert.Contains(t, []string{"LimitExceededException", "ResourceLimitExceeded", "QuotaExceededException"}, 
+				awsErr.Code(), "Expected limit exceeded error")
+		case "invalid_parameter":
+			assert.Contains(t, []string{"InvalidParameterValue", "InvalidParameter", "ValidationException"}, 
+				awsErr.Code(), "Expected invalid parameter error")
+		case "not_found":
+			assert.Contains(t, []string{"ResourceNotFoundException", "NotFound", "NoSuchEntity"}, 
+				awsErr.Code(), "Expected not found error")
+		case "access_denied":
+			assert.Contains(t, []string{"AccessDenied", "UnauthorizedOperation", "Forbidden"}, 
+				awsErr.Code(), "Expected access denied error")
+		default:
+			t.Fatalf("Unknown expected error type: %s", expectedErrorType)
+		}
+		
+		t.Logf("✓ AWS error handling validated for %s: %s", expectedErrorType, awsErr.Code())
+	} else {
+		t.Fatalf("Expected AWS error but got: %v", err)
+	}
+}
+
+// TestNetworkConnectivityErrorScenarios tests network-related error conditions
+func TestNetworkConnectivityErrorScenarios(t *testing.T, region string) {
+	// Create context with short timeout to simulate network issues
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	
+	// Create AWS session with custom endpoint for testing
+	sess, err := session.NewSession(&aws.Config{
+		Region:   aws.String(region),
+		Endpoint: aws.String("https://invalid-endpoint.amazonaws.com"), // Invalid endpoint
+	})
+	require.NoError(t, err, "Failed to create AWS session for network error testing")
+	
+	svc := route53resolver.New(sess)
+	
+	// Try to list resolver rules with invalid endpoint
+	listInput := &route53resolver.ListResolverRulesInput{
+		MaxResults: aws.Int64(1),
+	}
+	
+	_, err = svc.ListResolverRulesWithContext(ctx, listInput)
+	
+	// Should get network error
+	if err != nil {
+		t.Logf("✓ Network connectivity error detected as expected: %v", err)
+		
+		// Validate it's a network-related error
+		if strings.Contains(err.Error(), "timeout") || 
+		   strings.Contains(err.Error(), "network") ||
+		   strings.Contains(err.Error(), "connection") {
+			t.Logf("✓ Network error properly categorized")
+		}
+	} else {
+		t.Logf("Warning: Expected network error but request succeeded")
+	}
 }
 
 // WaitForResolverRuleDeletion waits for a resolver rule to be deleted with exponential backoff

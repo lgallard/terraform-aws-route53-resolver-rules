@@ -527,6 +527,175 @@ func TestTerraformRoute53ResolverRulesErrorHandling(t *testing.T) {
 	}
 }
 
+// TestTerraformRoute53ResolverRulesAWSServiceLimits tests error scenarios for AWS service limits and quotas
+func TestTerraformRoute53ResolverRulesAWSServiceLimits(t *testing.T) {
+	t.Parallel()
+
+	uniqueID := random.UniqueId()
+	awsRegion := awshelper.GetRandomStableRegion(t, nil, nil)
+	
+	// Verify test environment safety
+	VerifyTestEnvironment(t, awsRegion)
+
+	// Generate test session ID for isolation
+	sessionID := GenerateTestSessionID(t)
+
+	serviceLimitTests := []struct {
+		name        string
+		description string
+		vars        map[string]interface{}
+		expectError bool
+		errorText   string
+	}{
+		{
+			name:        "excessive_resolver_rules_count",
+			description: "Test creation of many resolver rules to approach service limits",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceNameWithSession("resolver-endpoint", "limit-test", sessionID),
+				"rules": func() []map[string]interface{} {
+					rules := make([]map[string]interface{}, 50) // Test near AWS limit
+					for i := 0; i < 50; i++ {
+						rules[i] = map[string]interface{}{
+							"domain_name": fmt.Sprintf("limit-test-%d.example.com.", i),
+							"rule_name":   fmt.Sprintf("limit-rule-%d-%s", i, uniqueID),
+							"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", fmt.Sprintf("limit-%d", i), sessionID)},
+							"ips":         []string{"192.168.1.10"},
+						}
+					}
+					return rules
+				}(),
+			},
+			expectError: false, // Should handle reasonable number of rules
+		},
+		{
+			name:        "ram_resource_sharing_limits",
+			description: "Test RAM resource sharing with many principals to test quota limits",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceNameWithSession("resolver-endpoint", "ram-limit", sessionID),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "ram-limit-test.example.com.",
+						"rule_name":   fmt.Sprintf("ram-limit-rule-%s", uniqueID),
+						"ram_name":    fmt.Sprintf("ram-limit-share-%s", uniqueID),
+						"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", "ram-limit", sessionID)},
+						"ips":         []string{"192.168.1.10"},
+						"principals": func() []string {
+							principals := make([]string, 20) // Test many principals
+							for i := 0; i < 20; i++ {
+								principals[i] = GenerateTestResourceNameWithSession("account", fmt.Sprintf("principal-%d", i), sessionID)
+							}
+							return principals
+						}(),
+					},
+				},
+			},
+			expectError: false, // Should handle reasonable number of principals
+		},
+		{
+			name:        "vpc_association_limits",
+			description: "Test resolver rule with many VPC associations",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceNameWithSession("resolver-endpoint", "vpc-limit", sessionID),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "vpc-limit-test.example.com.",
+						"rule_name":   fmt.Sprintf("vpc-limit-rule-%s", uniqueID),
+						"vpc_ids": func() []string {
+							vpcs := make([]string, 25) // Test many VPC associations
+							for i := 0; i < 25; i++ {
+								vpcs[i] = GenerateTestResourceNameWithSession("vpc", fmt.Sprintf("vpc-limit-%d", i), sessionID)
+							}
+							return vpcs
+						}(),
+						"ips": []string{"192.168.1.10"},
+					},
+				},
+			},
+			expectError: false, // Should handle reasonable number of VPCs
+		},
+		{
+			name:        "invalid_resource_references",
+			description: "Test with invalid AWS resource references that would cause API errors",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": "rslvr-out-invalidendpoint123", // Invalid but properly formatted
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "invalid-ref-test.example.com.",
+						"rule_name":   fmt.Sprintf("invalid-ref-rule-%s", uniqueID),
+						"vpc_ids":     []string{"vpc-invalidvpcref123"}, // Invalid but properly formatted
+						"ips":         []string{"192.168.1.10"},
+						"principals":  []string{"123456789012"}, // Valid format but non-existent account
+					},
+				},
+			},
+			expectError: true,
+			errorText:   "invalid", // Expect validation or API errors
+		},
+		{
+			name:        "cross_region_resource_references",
+			description: "Test cross-region resource references that might cause errors",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceNameWithSession("resolver-endpoint", "cross-region", sessionID),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "cross-region-test.example.com.",
+						"rule_name":   fmt.Sprintf("cross-region-rule-%s", uniqueID),
+						"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", "cross-region", sessionID)},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			expectError: false, // Depends on configuration
+		},
+	}
+
+	for _, tc := range serviceLimitTests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Setup cleanup for any test resources
+			defer func() {
+				CleanupTestResolverRules(t, awsRegion, "terratest-")
+			}()
+
+			// Validate resource formats before testing
+			if !tc.expectError {
+				resourceMap := map[string]string{
+					"resolver-endpoint": tc.vars["resolver_endpoint_id"].(string),
+				}
+				if rules, ok := tc.vars["rules"].([]map[string]interface{}); ok && len(rules) > 0 {
+					if vpcIDs, ok := rules[0]["vpc_ids"].([]string); ok && len(vpcIDs) > 0 {
+						resourceMap["vpc"] = vpcIDs[0]
+					}
+					if principals, ok := rules[0]["principals"].([]string); ok && len(principals) > 0 {
+						resourceMap["account"] = principals[0]
+					}
+				}
+				ValidateAWSResourceFormats(t, resourceMap)
+			}
+
+			terraformOptions := &terraform.Options{
+				TerraformDir: "../",
+				Vars:         tc.vars,
+				EnvVars: map[string]string{
+					"AWS_DEFAULT_REGION": awsRegion,
+				},
+			}
+
+			if tc.expectError {
+				_, err := terraform.InitAndPlanE(t, terraformOptions)
+				assert.Error(t, err, "Expected service limit error for test case: %s", tc.name)
+				if tc.errorText != "" {
+					assert.Contains(t, strings.ToLower(err.Error()), strings.ToLower(tc.errorText),
+						"Error should contain expected text for test case: %s", tc.name)
+				}
+				t.Logf("Expected service limit error handled correctly for: %s - %s", tc.name, tc.description)
+			} else {
+				terraform.InitAndPlan(t, terraformOptions)
+				t.Logf("Service limit test passed: %s - %s", tc.name, tc.description)
+			}
+		})
+	}
+}
+
 // TestTerraformRoute53ResolverRulesEdgeCases tests comprehensive edge cases and boundary conditions
 func TestTerraformRoute53ResolverRulesEdgeCases(t *testing.T) {
 	t.Parallel()
