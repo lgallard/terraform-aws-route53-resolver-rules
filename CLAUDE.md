@@ -599,10 +599,6 @@ variable "allow_external_principals" {
   type        = bool
   default     = false
 
-  validation {
-    condition     = var.allow_external_principals == false
-    error_message = "External principal sharing is disabled for security. Set to true only if required."
-  }
 }
 ```
 
