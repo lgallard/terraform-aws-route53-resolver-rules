@@ -18,12 +18,14 @@ import (
 	"github.com/aws/aws-sdk-go/aws/client"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/organizations"
 	"github.com/aws/aws-sdk-go/service/ram"
 	"github.com/aws/aws-sdk-go/service/route53resolver"
 	"github.com/aws/aws-sdk-go/service/sts"
 	awstest "github.com/gruntwork-io/terratest/modules/aws"
 	"github.com/gruntwork-io/terratest/modules/random"
 	"github.com/gruntwork-io/terratest/modules/retry"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -584,40 +586,15 @@ func testRAMServiceLimits(t *testing.T, ctx context.Context, sess *session.Sessi
 func SimulateAWSServiceErrors(t *testing.T, errorType string) error {
 	switch errorType {
 	case "throttling":
-		return &awserr.RequestError{
-			OrigErr: &awserr.Error{
-				Code_:    "Throttling",
-				Message_: "Rate exceeded",
-			},
-		}
+		return awserr.New("Throttling", "Rate exceeded", nil)
 	case "limit_exceeded":
-		return &awserr.RequestError{
-			OrigErr: &awserr.Error{
-				Code_:    "LimitExceededException",
-				Message_: "Resource limit exceeded",
-			},
-		}
+		return awserr.New("LimitExceededException", "Resource limit exceeded", nil)
 	case "invalid_parameter":
-		return &awserr.RequestError{
-			OrigErr: &awserr.Error{
-				Code_:    "InvalidParameterValue",
-				Message_: "Invalid parameter value",
-			},
-		}
+		return awserr.New("InvalidParameterValue", "Invalid parameter value", nil)
 	case "not_found":
-		return &awserr.RequestError{
-			OrigErr: &awserr.Error{
-				Code_:    "ResourceNotFoundException",
-				Message_: "Resource not found",
-			},
-		}
+		return awserr.New("ResourceNotFoundException", "Resource not found", nil)
 	case "access_denied":
-		return &awserr.RequestError{
-			OrigErr: &awserr.Error{
-				Code_:    "AccessDenied",
-				Message_: "Access denied",
-			},
-		}
+		return awserr.New("AccessDenied", "Access denied", nil)
 	default:
 		return fmt.Errorf("unknown error type: %s", errorType)
 	}
@@ -852,6 +829,150 @@ func WaitForResolverEndpointAvailable(t *testing.T, region, endpointID string, m
 
 		return "", fmt.Errorf("Resolver endpoint %s is still %s", endpointID, *result.ResolverEndpoint.Status)
 	})
+}
+
+// DetectAWSAccountType detects the type of AWS account (personal, organization, sandbox, production)
+func DetectAWSAccountType(t *testing.T, region string) string {
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String(region),
+	})
+	if err != nil {
+		t.Logf("Failed to create AWS session for account type detection: %v", err)
+		return "unknown"
+	}
+
+	// Check if we're in an AWS Organizations account (with graceful degradation)
+	orgClient := organizations.New(sess)
+	_, err = orgClient.DescribeOrganization(&organizations.DescribeOrganizationInput{})
+	if err == nil {
+		t.Log("Detected AWS Organizations account")
+		return "organization"
+	} else {
+		// Organizations API might not be available or accessible
+		t.Logf("Organizations API not accessible (expected in many environments): %v", err)
+	}
+
+	// Check STS caller identity for account information
+	stsClient := sts.New(sess)
+	identity, err := stsClient.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+	if err != nil {
+		t.Logf("Failed to get caller identity: %v", err)
+		return "unknown"
+	}
+
+	accountID := *identity.Account
+	userArn := *identity.Arn
+
+	// Check if it's a sandbox/temporary account (common patterns)
+	if strings.Contains(userArn, "sandbox") || strings.Contains(userArn, "test") || 
+	   strings.Contains(userArn, "dev") || strings.Contains(userArn, "temp") {
+		t.Log("Detected sandbox/test account")
+		return "sandbox"
+	}
+
+	// Check for well-known AWS service account patterns
+	if strings.HasPrefix(accountID, "123456789") || accountID == "123456789012" {
+		t.Log("Detected example/mock account ID")
+		return "mock"
+	}
+
+	// Check for assumed role vs user
+	if strings.Contains(userArn, ":assumed-role/") {
+		t.Log("Detected assumed role - likely production/CI environment")
+		return "production"
+	} else if strings.Contains(userArn, ":user/") {
+		t.Log("Detected IAM user - likely personal/development environment")
+		return "personal"
+	}
+
+	t.Log("Detected standard AWS account")
+	return "standard"
+}
+
+// ValidateAccountSafety validates that we're running in a safe test environment
+func ValidateAccountSafety(t *testing.T, region string) {
+	accountType := DetectAWSAccountType(t, region)
+	
+	// Define safe account types for testing
+	safeAccountTypes := []string{"sandbox", "mock", "test", "development"}
+	
+	isSafe := false
+	for _, safeType := range safeAccountTypes {
+		if strings.Contains(strings.ToLower(accountType), safeType) {
+			isSafe = true
+			break
+		}
+	}
+
+	// Additional safety checks
+	if !isSafe {
+		// Check environment variables that indicate test/development environment
+		testEnvVars := []string{"CI", "GITHUB_ACTIONS", "TERRAFORM_TEST", "TEST_ENV"}
+		for _, envVar := range testEnvVars {
+			if os.Getenv(envVar) != "" {
+				t.Logf("Test environment detected via %s environment variable", envVar)
+				isSafe = true
+				break
+			}
+		}
+	}
+
+	if !isSafe && accountType == "production" {
+		t.Skip("Skipping test in production environment for safety. Set TEST_ENV=true to override.")
+	}
+
+	if !isSafe && accountType == "organization" {
+		t.Log("WARNING: Running tests in AWS Organizations account. Ensure this is intentional.")
+	}
+
+	t.Logf("Account safety validation passed - account type: %s", accountType)
+}
+
+// EnhancedVerifyTestEnvironment performs comprehensive test environment verification
+func EnhancedVerifyTestEnvironment(t *testing.T, region string) {
+	// Perform account safety validation
+	ValidateAccountSafety(t, region)
+	
+	// Perform standard environment verification
+	VerifyTestEnvironment(t, region)
+	
+	// Additional safety checks for Route53 Resolver testing
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String(region),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create AWS session: %v", err)
+	}
+
+	// Check if Route53 Resolver is available in the region
+	resolverClient := route53resolver.New(sess)
+	_, err = resolverClient.ListResolverEndpoints(&route53resolver.ListResolverEndpointsInput{
+		MaxResults: aws.Int64(1),
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "not supported") || strings.Contains(err.Error(), "not available") {
+			t.Skipf("Route53 Resolver not available in region %s: %v", region, err)
+		}
+		t.Logf("Warning: Route53 Resolver API test failed in region %s: %v", region, err)
+	}
+
+	// Check for existing resolver rules to avoid conflicts
+	existingRules, err := resolverClient.ListResolverRules(&route53resolver.ListResolverRulesInput{
+		MaxResults: aws.Int64(10),
+	})
+	if err == nil && len(existingRules.ResolverRules) > 0 {
+		testRuleCount := 0
+		for _, rule := range existingRules.ResolverRules {
+			if rule.Name != nil && strings.Contains(*rule.Name, "terratest") {
+				testRuleCount++
+			}
+		}
+		if testRuleCount > 10 {
+			t.Log("WARNING: Many existing terratest resolver rules found. Consider cleanup.")
+		}
+	}
+
+	t.Log("Enhanced test environment verification completed successfully")
 }
 
 // CleanupTestResolverRules safely removes test resolver rules with isolation checks

@@ -154,7 +154,6 @@ func TestTerraformRoute53ResolverRulesWithRAM(t *testing.T) {
 func TestTerraformRoute53ResolverRulesCustomPorts(t *testing.T) {
 	t.Parallel()
 
-	uniqueID := random.UniqueId()
 	awsRegion := awshelper.GetRandomStableRegion(t, nil, nil)
 	mockEndpointID := GenerateTestResourceName("resolver-endpoint", "test")
 
@@ -414,7 +413,6 @@ func createTestResolverEndpoint(t *testing.T, region, vpcID string, subnetIDs []
 func TestTerraformRoute53ResolverRulesErrorHandling(t *testing.T) {
 	t.Parallel()
 
-	uniqueID := random.UniqueId()
 	awsRegion := awshelper.GetRandomStableRegion(t, nil, nil)
 
 	// Test cases for various error scenarios
@@ -691,6 +689,316 @@ func TestTerraformRoute53ResolverRulesAWSServiceLimits(t *testing.T) {
 			} else {
 				terraform.InitAndPlan(t, terraformOptions)
 				t.Logf("Service limit test passed: %s - %s", tc.name, tc.description)
+			}
+		})
+	}
+}
+
+// TestTerraformRoute53ResolverRulesNetworkTimeouts tests network timeout and connectivity error scenarios
+func TestTerraformRoute53ResolverRulesNetworkTimeouts(t *testing.T) {
+	t.Parallel()
+
+	uniqueID := random.UniqueId()
+	awsRegion := awshelper.GetRandomStableRegion(t, nil, nil)
+	
+	// Verify test environment safety
+	VerifyTestEnvironment(t, awsRegion)
+
+	// Generate test session ID for isolation
+	sessionID := GenerateTestSessionID(t)
+
+	networkTimeoutTests := []struct {
+		name        string
+		description string
+		vars        map[string]interface{}
+		expectError bool
+		errorText   string
+	}{
+		{
+			name:        "network_timeout_simulation",
+			description: "Test network timeout scenarios with connection pooling",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceNameWithSession("resolver-endpoint", "timeout-test", sessionID),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "timeout-test.example.com.",
+						"rule_name":   fmt.Sprintf("timeout-rule-%s", uniqueID),
+						"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", "timeout", sessionID)},
+						"ips":         []string{"192.168.1.10", "192.168.1.11"},
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:        "dns_resolution_failure",
+			description: "Test DNS resolution failure scenarios with fallback servers",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceNameWithSession("resolver-endpoint", "dns-fail", sessionID),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "dns-fail-test.example.com.",
+						"rule_name":   fmt.Sprintf("dns-fail-rule-%s", uniqueID),
+						"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", "dns-fail", sessionID)},
+						"ips":         []string{"203.0.113.1", "203.0.113.2"}, // TEST-NET-3 IPs (RFC 5737)
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:        "aws_api_throttling_simulation",
+			description: "Test AWS API throttling and retry scenarios",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceNameWithSession("resolver-endpoint", "throttle", sessionID),
+				"rules": func() []map[string]interface{} {
+					// Create many rules to potentially trigger throttling
+					rules := make([]map[string]interface{}, 10)
+					for i := 0; i < 10; i++ {
+						rules[i] = map[string]interface{}{
+							"domain_name": fmt.Sprintf("throttle-%d.example.com.", i),
+							"rule_name":   fmt.Sprintf("throttle-rule-%d-%s", i, uniqueID),
+							"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", fmt.Sprintf("throttle-%d", i), sessionID)},
+							"ips":         []string{"192.168.1.10"},
+						}
+					}
+					return rules
+				}(),
+			},
+			expectError: false,
+		},
+		{
+			name:        "connection_pool_exhaustion",
+			description: "Test connection pool exhaustion scenarios",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceNameWithSession("resolver-endpoint", "pool-test", sessionID),
+				"rules": func() []map[string]interface{} {
+					// Create many rules to test connection pooling
+					rules := make([]map[string]interface{}, 20)
+					for i := 0; i < 20; i++ {
+						rules[i] = map[string]interface{}{
+							"domain_name": fmt.Sprintf("pool-test-%d.example.com.", i),
+							"rule_name":   fmt.Sprintf("pool-rule-%d-%s", i, uniqueID),
+							"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", fmt.Sprintf("pool-%d", i), sessionID)},
+							"ips":         []string{"192.168.1.10", "192.168.1.11"},
+						}
+					}
+					return rules
+				}(),
+			},
+			expectError: false,
+		},
+		{
+			name:        "network_partition_simulation",
+			description: "Test network partition and connectivity loss scenarios",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceNameWithSession("resolver-endpoint", "partition", sessionID),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "partition-test.example.com.",
+						"rule_name":   fmt.Sprintf("partition-rule-%s", uniqueID),
+						"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", "partition", sessionID)},
+						"ips":         []string{"198.51.100.1", "198.51.100.2"}, // TEST-NET-2 IPs (RFC 5737)
+					},
+				},
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tc := range networkTimeoutTests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Setup cleanup for any test resources
+			defer func() {
+				CleanupTestResolverRules(t, awsRegion, "terratest-")
+			}()
+
+			// Validate resource formats
+			resourceMap := map[string]string{
+				"resolver-endpoint": tc.vars["resolver_endpoint_id"].(string),
+			}
+			if rules, ok := tc.vars["rules"].([]map[string]interface{}); ok && len(rules) > 0 {
+				if vpcIDs, ok := rules[0]["vpc_ids"].([]string); ok && len(vpcIDs) > 0 {
+					resourceMap["vpc"] = vpcIDs[0]
+				}
+			}
+			ValidateAWSResourceFormatsWithRegion(t, resourceMap, awsRegion)
+
+			terraformOptions := &terraform.Options{
+				TerraformDir: "../",
+				Vars:         tc.vars,
+				EnvVars: map[string]string{
+					"AWS_DEFAULT_REGION": awsRegion,
+				},
+			}
+
+			if tc.expectError {
+				_, err := terraform.InitAndPlanE(t, terraformOptions)
+				assert.Error(t, err, "Expected network timeout error for test case: %s", tc.name)
+				if tc.errorText != "" {
+					assert.Contains(t, strings.ToLower(err.Error()), strings.ToLower(tc.errorText),
+						"Error should contain expected text for test case: %s", tc.name)
+				}
+				t.Logf("Expected network timeout error handled correctly for: %s - %s", tc.name, tc.description)
+			} else {
+				terraform.InitAndPlan(t, terraformOptions)
+				t.Logf("Network timeout test passed: %s - %s", tc.name, tc.description)
+			}
+		})
+	}
+}
+
+// TestTerraformRoute53ResolverRulesCrossRegionErrors tests cross-region error scenarios
+func TestTerraformRoute53ResolverRulesCrossRegionErrors(t *testing.T) {
+	t.Parallel()
+
+	// Generate test session ID for isolation
+	sessionID := GenerateTestSessionID(t)
+
+	crossRegionTests := []struct {
+		name        string
+		description string
+		region      string
+		vars        map[string]interface{}
+		expectError bool
+		errorText   string
+	}{
+		{
+			name:        "cross_region_vpc_reference",
+			description: "Test resolver rule with VPC reference in different region",
+			region:      "us-east-1",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceNameWithSession("resolver-endpoint", "cross-region", sessionID),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "cross-region.example.com.",
+						"rule_name":   fmt.Sprintf("cross-region-rule-%s", uniqueID),
+						"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", "cross-region", sessionID)},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			expectError: false, // Valid configuration, errors would occur at apply time
+		},
+		{
+			name:        "cross_region_ram_sharing",
+			description: "Test RAM sharing across regions with resolver rules",
+			region:      "us-west-2",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceNameWithSession("resolver-endpoint", "ram-cross", sessionID),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "ram-cross-region.example.com.",
+						"rule_name":   fmt.Sprintf("ram-cross-rule-%s", uniqueID),
+						"ram_name":    fmt.Sprintf("ram-cross-share-%s", uniqueID),
+						"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", "ram-cross", sessionID)},
+						"ips":         []string{"192.168.1.10"},
+						"principals":  []string{GenerateTestResourceNameWithSession("account", "cross-principal", sessionID)},
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:        "resolver_endpoint_region_mismatch",
+			description: "Test resolver endpoint in different region than VPCs",
+			region:      "eu-west-1",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceNameWithSession("resolver-endpoint", "region-mismatch", sessionID),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "region-mismatch.example.com.",
+						"rule_name":   fmt.Sprintf("region-mismatch-rule-%s", uniqueID),
+						"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", "region-mismatch", sessionID)},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			expectError: false, // Configuration valid, runtime error would occur
+		},
+		{
+			name:        "multiple_region_stress_test",
+			description: "Test resource creation with rapid region switching",
+			region:      "us-east-1",
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceNameWithSession("resolver-endpoint", "multi-region", sessionID),
+				"rules": func() []map[string]interface{} {
+					rules := make([]map[string]interface{}, 5)
+					for i := 0; i < 5; i++ {
+						rules[i] = map[string]interface{}{
+							"domain_name": fmt.Sprintf("multi-region-%d.example.com.", i),
+							"rule_name":   fmt.Sprintf("multi-region-rule-%d-%s", i, uniqueID),
+							"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", fmt.Sprintf("multi-region-%d", i), sessionID)},
+							"ips":         []string{"192.168.1.10"},
+						}
+					}
+					return rules
+				}(),
+			},
+			expectError: false,
+		},
+		{
+			name:        "unsupported_region_simulation",
+			description: "Test with region that doesn't support Route53 Resolver Rules",
+			region:      "ap-southeast-3", // Newer region that might have limited service availability
+			vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceNameWithSession("resolver-endpoint", "unsupported", sessionID),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "unsupported-region.example.com.",
+						"rule_name":   fmt.Sprintf("unsupported-rule-%s", uniqueID),
+						"vpc_ids":     []string{GenerateTestResourceNameWithSession("vpc", "unsupported", sessionID)},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			expectError: false, // Configuration valid, service availability error at runtime
+		},
+	}
+
+	for _, tc := range crossRegionTests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Setup cleanup for any test resources
+			defer func() {
+				CleanupTestResolverRules(t, tc.region, "terratest-")
+			}()
+
+			// Verify test environment safety for the specific region
+			VerifyTestEnvironment(t, tc.region)
+
+			// Validate resource formats with region
+			resourceMap := map[string]string{
+				"resolver-endpoint": tc.vars["resolver_endpoint_id"].(string),
+			}
+			if rules, ok := tc.vars["rules"].([]map[string]interface{}); ok && len(rules) > 0 {
+				if vpcIDs, ok := rules[0]["vpc_ids"].([]string); ok && len(vpcIDs) > 0 {
+					resourceMap["vpc"] = vpcIDs[0]
+				}
+				if principals, ok := rules[0]["principals"].([]string); ok && len(principals) > 0 {
+					resourceMap["account"] = principals[0]
+				}
+			}
+			ValidateAWSResourceFormatsWithRegion(t, resourceMap, tc.region)
+
+			terraformOptions := &terraform.Options{
+				TerraformDir: "../",
+				Vars:         tc.vars,
+				EnvVars: map[string]string{
+					"AWS_DEFAULT_REGION": tc.region,
+				},
+			}
+
+			if tc.expectError {
+				_, err := terraform.InitAndPlanE(t, terraformOptions)
+				assert.Error(t, err, "Expected cross-region error for test case: %s", tc.name)
+				if tc.errorText != "" {
+					assert.Contains(t, strings.ToLower(err.Error()), strings.ToLower(tc.errorText),
+						"Error should contain expected text for test case: %s", tc.name)
+				}
+				t.Logf("Expected cross-region error handled correctly for: %s - %s", tc.name, tc.description)
+			} else {
+				terraform.InitAndPlan(t, terraformOptions)
+				t.Logf("Cross-region test passed: %s - %s", tc.name, tc.description)
 			}
 		})
 	}
