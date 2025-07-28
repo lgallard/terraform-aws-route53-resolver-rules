@@ -19,12 +19,12 @@ func TestTerraformRoute53ResolverRulesValidation(t *testing.T) {
 			Name:        "valid_basic_configuration",
 			Description: "Test valid basic resolver rule configuration",
 			Vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-test123",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "basic-test"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "example.com.",
 						"rule_name":   "example-rule",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "basic-test")},
 						"ips":         []string{"192.168.1.10", "192.168.1.11"},
 					},
 				},
@@ -35,18 +35,18 @@ func TestTerraformRoute53ResolverRulesValidation(t *testing.T) {
 			Name:        "valid_multiple_rules",
 			Description: "Test valid configuration with multiple resolver rules",
 			Vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-test123",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "multiple-rules"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "example.com.",
 						"rule_name":   "example-rule",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "rule-1")},
 						"ips":         []string{"192.168.1.10"},
 					},
 					{
 						"domain_name": "test.local.",
 						"rule_name":   "test-rule",
-						"vpc_ids":     []string{"vpc-87654321"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "rule-2")},
 						"ips":         []string{"10.0.1.10"},
 					},
 				},
@@ -57,12 +57,12 @@ func TestTerraformRoute53ResolverRulesValidation(t *testing.T) {
 			Name:        "valid_custom_ports",
 			Description: "Test valid configuration with custom DNS ports",
 			Vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-test123",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "custom-ports"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "example.com.",
 						"rule_name":   "custom-ports-rule",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "custom-ports")},
 						"ips":         []string{"192.168.1.10:8053", "192.168.1.11:5353"},
 					},
 				},
@@ -73,15 +73,15 @@ func TestTerraformRoute53ResolverRulesValidation(t *testing.T) {
 			Name:        "valid_ram_sharing",
 			Description: "Test valid configuration with RAM resource sharing",
 			Vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-test123",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "validation-test"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "shared.example.com.",
 						"rule_name":   "shared-rule",
 						"ram_name":    "shared-ram",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
 						"ips":         []string{"192.168.1.10"},
-						"principals":  []string{"123456789012", "210987654321"},
+						"principals":  []string{GenerateTestResourceName("account", "principal-1"), GenerateTestResourceName("account", "principal-2")},
 					},
 				},
 			},
@@ -91,12 +91,12 @@ func TestTerraformRoute53ResolverRulesValidation(t *testing.T) {
 			Name:        "valid_with_tags",
 			Description: "Test valid configuration with resource tags",
 			Vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-test123",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "validation-test"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "tagged.example.com.",
 						"rule_name":   "tagged-rule",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
 						"ips":         []string{"192.168.1.10"},
 					},
 				},
@@ -111,7 +111,7 @@ func TestTerraformRoute53ResolverRulesValidation(t *testing.T) {
 			Name:        "empty_rules_list",
 			Description: "Test configuration with empty rules list",
 			Vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-test123",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "validation-test"),
 				"rules":                []map[string]interface{}{},
 			},
 			ExpectError: false, // Empty rules should be valid
@@ -125,7 +125,7 @@ func TestTerraformRoute53ResolverRulesValidation(t *testing.T) {
 					{
 						"domain_name": "example.com.",
 						"rule_name":   "null-endpoint-rule",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
 						"ips":         []string{"192.168.1.10"},
 					},
 				},
@@ -136,12 +136,12 @@ func TestTerraformRoute53ResolverRulesValidation(t *testing.T) {
 			Name:        "multiple_vpc_associations",
 			Description: "Test rule associated with multiple VPCs",
 			Vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-test123",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "validation-test"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "multi-vpc.example.com.",
 						"rule_name":   "multi-vpc-rule",
-						"vpc_ids":     []string{"vpc-12345678", "vpc-87654321", "vpc-abcdef01"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "multi-1"), GenerateTestResourceName("vpc", "multi-2"), GenerateTestResourceName("vpc", "multi-3")},
 						"ips":         []string{"192.168.1.10"},
 					},
 				},
@@ -152,12 +152,12 @@ func TestTerraformRoute53ResolverRulesValidation(t *testing.T) {
 			Name:        "mixed_port_configurations",
 			Description: "Test mixed IP addresses with and without custom ports",
 			Vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-test123",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "validation-test"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "mixed-ports.example.com.",
 						"rule_name":   "mixed-ports-rule",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
 						"ips":         []string{"192.168.1.10", "192.168.1.11:8053", "192.168.1.12"},
 					},
 				},
@@ -168,29 +168,81 @@ func TestTerraformRoute53ResolverRulesValidation(t *testing.T) {
 			Name:        "complex_domain_names",
 			Description: "Test various valid domain name formats",
 			Vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-test123",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "validation-test"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "sub.domain.example.com.",
 						"rule_name":   "subdomain-rule",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
 						"ips":         []string{"192.168.1.10"},
 					},
 					{
 						"domain_name": "local.",
 						"rule_name":   "local-rule",
-						"vpc_ids":     []string{"vpc-87654321"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test-2")},
 						"ips":         []string{"10.0.1.10"},
 					},
 					{
 						"domain_name": "very-long-subdomain-name.corporate.internal.example.org.",
 						"rule_name":   "long-domain-rule",
-						"vpc_ids":     []string{"vpc-abcdef01"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test-3")},
 						"ips":         []string{"172.16.1.10"},
 					},
 				},
 			},
 			ExpectError: false,
+		},
+		// Error test cases for validation
+		{
+			Name:        "invalid_domain_name_format",
+			Description: "Test invalid domain name format (missing trailing dot)",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "invalid-domain"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "invalid-domain-no-dot", // Missing trailing dot
+						"rule_name":   "invalid-domain-rule",
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "invalid-test")},
+						"ips":         []string{"192.168.1.10"},
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "domain name",
+		},
+		{
+			Name:        "invalid_ip_address_format",
+			Description: "Test invalid IP address format",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "invalid-ip"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "example.com.",
+						"rule_name":   "invalid-ip-rule",
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "invalid-test")},
+						"ips":         []string{"999.999.999.999"}, // Invalid IP
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "invalid",
+		},
+		{
+			Name:        "invalid_port_range",
+			Description: "Test invalid port number (out of range)",
+			Vars: map[string]interface{}{
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "invalid-port"),
+				"rules": []map[string]interface{}{
+					{
+						"domain_name": "example.com.",
+						"rule_name":   "invalid-port-rule",
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "invalid-test")},
+						"ips":         []string{"192.168.1.10:99999"}, // Invalid port range
+					},
+				},
+			},
+			ExpectError: true,
+			ErrorText:   "port",
 		},
 	}
 
@@ -238,11 +290,11 @@ func TestTerraformRoute53ResolverRulesVariableTypes(t *testing.T) {
 			name:        "string_resolver_endpoint_id",
 			description: "Test resolver_endpoint_id as string",
 			vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-12345",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "type-test"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "string-test.example.com.",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
 						"ips":         []string{"192.168.1.10"},
 					},
 				},
@@ -257,7 +309,7 @@ func TestTerraformRoute53ResolverRulesVariableTypes(t *testing.T) {
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "null-test.example.com.",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
 						"ips":         []string{"192.168.1.10"},
 					},
 				},
@@ -268,18 +320,18 @@ func TestTerraformRoute53ResolverRulesVariableTypes(t *testing.T) {
 			name:        "list_type_rules",
 			description: "Test rules as list type",
 			vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-12345",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "type-test"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "list-test-1.example.com.",
 						"rule_name":   "list-test-1-rule",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
 						"ips":         []string{"192.168.1.10"},
 					},
 					{
 						"domain_name": "list-test-2.example.com.",
 						"rule_name":   "list-test-2-rule",
-						"vpc_ids":     []string{"vpc-87654321"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test-2")},
 						"ips":         []string{"192.168.2.10"},
 					},
 				},
@@ -290,12 +342,12 @@ func TestTerraformRoute53ResolverRulesVariableTypes(t *testing.T) {
 			name:        "map_type_tags",
 			description: "Test tags as map of strings",
 			vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-12345",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "type-test"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "tags-test.example.com.",
 						"rule_name":   "tags-test-rule",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
 						"ips":         []string{"192.168.1.10"},
 					},
 				},
@@ -312,12 +364,12 @@ func TestTerraformRoute53ResolverRulesVariableTypes(t *testing.T) {
 			name:        "empty_tags_map",
 			description: "Test empty tags map",
 			vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-12345",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "type-test"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "empty-tags.example.com.",
 						"rule_name":   "empty-tags-rule",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
 						"ips":         []string{"192.168.1.10"},
 					},
 				},
@@ -358,22 +410,22 @@ func TestTerraformRoute53ResolverRulesLocalValues(t *testing.T) {
 	terraformOptions := &terraform.Options{
 		TerraformDir: "../",
 		Vars: map[string]interface{}{
-			"resolver_endpoint_id": "rslvr-out-12345",
+			"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "type-test"),
 			"rules": []map[string]interface{}{
 				{
 					"domain_name": "test1.example.com.",
 					"rule_name":   "test1-rule",
-					"vpc_ids":     []string{"vpc-11111111", "vpc-22222222"},
+					"vpc_ids":     []string{GenerateTestResourceName("vpc", "local-1"), GenerateTestResourceName("vpc", "local-2")},
 					"ips":         []string{"192.168.1.10"},
-					"principals":  []string{"123456789012"},
+					"principals":  []string{GenerateTestResourceName("account", "principal-1")},
 				},
 				{
 					"domain_name": "test2.example.com.",
 					"rule_name":   fmt.Sprintf("custom-rule-%s", uniqueID),
 					"ram_name":    fmt.Sprintf("custom-ram-%s", uniqueID),
-					"vpc_ids":     []string{"vpc-33333333"},
+					"vpc_ids":     []string{GenerateTestResourceName("vpc", "local-3")},
 					"ips":         []string{"10.0.1.10", "10.0.1.11"},
-					"principals":  []string{"123456789012", "210987654321"},
+					"principals":  []string{GenerateTestResourceName("account", "principal-1"), GenerateTestResourceName("account", "principal-2")},
 				},
 			},
 		},
@@ -412,12 +464,12 @@ func TestTerraformRoute53ResolverRulesEdgeCases(t *testing.T) {
 			name:        "single_ip_address",
 			description: "Test with single IP address",
 			vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-12345",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "type-test"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "single-ip.example.com.",
 						"rule_name":   "single-ip-rule",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
 						"ips":         []string{"192.168.1.10"},
 					},
 				},
@@ -428,12 +480,12 @@ func TestTerraformRoute53ResolverRulesEdgeCases(t *testing.T) {
 			name:        "single_vpc_association",
 			description: "Test with single VPC association",
 			vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-12345",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "type-test"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "single-vpc.example.com.",
 						"rule_name":   "single-vpc-rule",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
 						"ips":         []string{"192.168.1.10", "192.168.1.11"},
 					},
 				},
@@ -444,14 +496,14 @@ func TestTerraformRoute53ResolverRulesEdgeCases(t *testing.T) {
 			name:        "single_principal",
 			description: "Test with single RAM principal",
 			vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-12345",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "type-test"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "single-principal.example.com.",
 						"rule_name":   "single-principal-rule",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
 						"ips":         []string{"192.168.1.10"},
-						"principals":  []string{"123456789012"},
+						"principals":  []string{GenerateTestResourceName("account", "principal-1")},
 					},
 				},
 			},
@@ -461,12 +513,12 @@ func TestTerraformRoute53ResolverRulesEdgeCases(t *testing.T) {
 			name:        "high_port_number",
 			description: "Test with high port number (65535)",
 			vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-12345",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "type-test"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "high-port.example.com.",
 						"rule_name":   "high-port-rule",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
 						"ips":         []string{"192.168.1.10:65535"},
 					},
 				},
@@ -477,7 +529,7 @@ func TestTerraformRoute53ResolverRulesEdgeCases(t *testing.T) {
 			name:        "no_vpc_associations",
 			description: "Test rule without VPC associations",
 			vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-12345",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "type-test"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "no-vpc.example.com.",
@@ -493,12 +545,12 @@ func TestTerraformRoute53ResolverRulesEdgeCases(t *testing.T) {
 			name:        "no_ram_principals",
 			description: "Test rule without RAM principals",
 			vars: map[string]interface{}{
-				"resolver_endpoint_id": "rslvr-out-12345",
+				"resolver_endpoint_id": GenerateTestResourceName("resolver-endpoint", "type-test"),
 				"rules": []map[string]interface{}{
 					{
 						"domain_name": "no-ram.example.com.",
 						"rule_name":   "no-ram-rule",
-						"vpc_ids":     []string{"vpc-12345678"},
+						"vpc_ids":     []string{GenerateTestResourceName("vpc", "test")},
 						"ips":         []string{"192.168.1.10"},
 						"principals":  []string{}, // Empty principals list
 					},
