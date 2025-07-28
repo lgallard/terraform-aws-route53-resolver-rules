@@ -60,8 +60,12 @@ func GetTestRegion(t *testing.T) string {
 	return awstest.GetRandomStableRegion(t, nil, nil)
 }
 
-// ValidateResolverRuleExists checks if a resolver rule exists in AWS with exponential backoff
+// ValidateResolverRuleExists checks if a resolver rule exists in AWS with context timeout and exponential backoff
 func ValidateResolverRuleExists(t *testing.T, region, ruleID string) *route53resolver.GetResolverRuleOutput {
+	// Create context with timeout for AWS API operations
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String(region),
 	})
@@ -78,9 +82,16 @@ func ValidateResolverRuleExists(t *testing.T, region, ruleID string) *route53res
 	baseDelay := time.Second
 	
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		result, err = svc.GetResolverRule(input)
+		// Use context for timeout control
+		result, err = svc.GetResolverRuleWithContext(ctx, input)
 		if err == nil {
 			return result
+		}
+		
+		// Check if it's a context timeout
+		if ctx.Err() == context.DeadlineExceeded {
+			require.Fail(t, "AWS API call timed out after 10 seconds for GetResolverRule: %s", ruleID)
+			return nil
 		}
 		
 		// Check if it's a retryable error
@@ -125,8 +136,12 @@ func ValidateResolverRuleAssociation(t *testing.T, region, ruleID, vpcID string)
 		"Expected resolver rule %s to be associated with VPC %s", ruleID, vpcID)
 }
 
-// ValidateRAMResourceShare checks if a RAM resource share exists with exponential backoff
+// ValidateRAMResourceShare checks if a RAM resource share exists with context timeout and exponential backoff
 func ValidateRAMResourceShare(t *testing.T, region, shareArn string, expectedPrincipals []string) {
+	// Create context with timeout for AWS API operations
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
 	maxRetries := 5
 	baseDelay := time.Second
 	
@@ -142,7 +157,7 @@ func ValidateRAMResourceShare(t *testing.T, region, shareArn string, expectedPri
 			ResourceShareArns: []*string{aws.String(shareArn)},
 		}
 
-		shareResult, err := svc.GetResourceShares(getInput)
+		shareResult, err := svc.GetResourceSharesWithContext(ctx, getInput)
 		if err == nil {
 			require.NotEmpty(t, shareResult.ResourceShares, "RAM resource share not found")
 			
@@ -153,7 +168,7 @@ func ValidateRAMResourceShare(t *testing.T, region, shareArn string, expectedPri
 					AssociationType:   aws.String("PRINCIPAL"),
 				}
 
-				assocResult, err := svc.GetResourceShareAssociations(assocInput)
+				assocResult, err := svc.GetResourceShareAssociationsWithContext(ctx, assocInput)
 				require.NoError(t, err, "Failed to get RAM resource share associations")
 
 				actualPrincipals := make([]string, 0)
@@ -184,8 +199,8 @@ func ValidateRAMResourceShare(t *testing.T, region, shareArn string, expectedPri
 	}
 }
 
-// ValidateDNSResolution performs DNS resolution test with context cancellation support
-func ValidateDNSResolution(t *testing.T, domain string, expectedIPs []string) {
+// ValidateDNSResolution performs DNS resolution test with context cancellation support and optional strict mode
+func ValidateDNSResolution(t *testing.T, domain string, expectedIPs []string, strictMode bool) {
 	if !strings.HasSuffix(domain, ".") {
 		domain += "."
 	}
@@ -214,11 +229,22 @@ func ValidateDNSResolution(t *testing.T, domain string, expectedIPs []string) {
 	if err != nil {
 		// Check if it was a context cancellation (timeout)
 		if ctx.Err() == context.DeadlineExceeded {
-			t.Logf("Warning: DNS lookup for %s timed out after 5 seconds (expected in test environment)", lookupDomain)
+			if strictMode {
+				t.Fatalf("DNS lookup for %s timed out after 5 seconds", lookupDomain)
+			} else {
+				t.Logf("Warning: DNS lookup for %s timed out after 5 seconds (expected in test environment)", lookupDomain)
+			}
 		} else {
-			t.Logf("Warning: DNS lookup for %s failed: %v (expected in test environment)", lookupDomain, err)
+			if strictMode {
+				t.Fatalf("DNS lookup for %s failed: %v", lookupDomain, err)
+			} else {
+				t.Logf("Warning: DNS lookup for %s failed: %v (expected in test environment)", lookupDomain, err)
+			}
 		}
-		return
+		
+		if !strictMode {
+			return
+		}
 	}
 	
 	// Validate expected IPs if provided
@@ -237,13 +263,28 @@ func ValidateDNSResolution(t *testing.T, domain string, expectedIPs []string) {
 				}
 			}
 			if !found {
-				t.Logf("Warning: Expected IP %s not found in DNS resolution for %s (got: %v)", 
-					expectedIP, lookupDomain, actualIPs)
+				if strictMode {
+					t.Fatalf("Expected IP %s not found in DNS resolution for %s (got: %v)", 
+						expectedIP, lookupDomain, actualIPs)
+				} else {
+					t.Logf("Warning: Expected IP %s not found in DNS resolution for %s (got: %v)", 
+						expectedIP, lookupDomain, actualIPs)
+				}
 			}
 		}
 	}
 	
-	t.Logf("✓ DNS resolution completed for %s with context cancellation support", lookupDomain)
+	t.Logf("✓ DNS resolution completed for %s with context cancellation support (strict mode: %v)", lookupDomain, strictMode)
+}
+
+// ValidateDNSResolutionWarningOnly performs DNS resolution test with warning-only behavior (backward compatibility)
+func ValidateDNSResolutionWarningOnly(t *testing.T, domain string, expectedIPs []string) {
+	ValidateDNSResolution(t, domain, expectedIPs, false)
+}
+
+// ValidateDNSResolutionStrict performs DNS resolution test with strict validation that fails tests on errors
+func ValidateDNSResolutionStrict(t *testing.T, domain string, expectedIPs []string) {
+	ValidateDNSResolution(t, domain, expectedIPs, true)
 }
 
 // WaitForResolverRuleDeletion waits for a resolver rule to be deleted with exponential backoff
