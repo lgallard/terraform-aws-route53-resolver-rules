@@ -79,9 +79,9 @@ ips = [
   "192.168.10.11:5353"  # Explicit port specification
 ]
 
-# Internal parsing logic splits on colon
+# Internal parsing logic splits on colon with proper error handling
 ip   = split(":", target_ip.value)[0]
-port = length(split(":", target_ip.value)) == 1 ? 53 : split(":", target_ip.value)[1]
+port = length(split(":", target_ip.value)) == 1 ? 53 : tonumber(split(":", target_ip.value)[1])
 ```
 
 ## Networking Considerations
@@ -127,14 +127,14 @@ resource "aws_security_group" "resolver_endpoint" {
     from_port   = 53
     to_port     = 53
     protocol    = "udp"
-    cidr_blocks = ["10.0.0.0/8"]  # Adjust to your network
+    cidr_blocks = ["10.0.1.0/24", "10.0.2.0/24"]  # Specific subnets only
   }
 
   egress {
     from_port   = 53
     to_port     = 53
     protocol    = "tcp"
-    cidr_blocks = ["10.0.0.0/8"]
+    cidr_blocks = ["10.0.1.0/24", "10.0.2.0/24"]
   }
 }
 ```
@@ -199,7 +199,7 @@ variable "trusted_accounts" {
 ```hcl
 # Example: Using with external endpoint module
 module "resolver_endpoint" {
-  source = "git::https://github.com/rhythmictech/terraform-aws-route53-endpoint"
+  source = "git::https://github.com/rhythmictech/terraform-aws-route53-endpoint?ref=v1.0.0"
   
   direction         = "outbound"
   vpc_id           = var.vpc_id
@@ -269,7 +269,7 @@ variable "rules" {
     condition = alltrue([
       for rule in var.rules : alltrue([
         for ip in rule.ips : 
-        can(regex("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}(?::[0-9]+)?$", ip))
+        can(regex("^(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?::[1-9][0-9]{0,4})?$", ip))
       ])
     ])
     error_message = "IP addresses must be in valid IPv4 format, optionally with port (e.g., '192.168.1.1' or '192.168.1.1:5353')."
@@ -417,8 +417,8 @@ aws route53resolver list-resolver-rule-associations \
   --filters Name=ResolverRuleId,Values=rslvr-rr-12345
 
 # Test target IP connectivity
-nc -zv 10.0.100.10 53  # Test UDP DNS port
-nc -zv 10.0.100.10 53  # Test TCP DNS port
+nc -zvu 10.0.100.10 53  # Test UDP DNS port
+nc -zv 10.0.100.10 53   # Test TCP DNS port
 ```
 
 ### Test Helper Functions
@@ -519,7 +519,7 @@ variable "resolver_security_group_rules" {
       from_port   = 53
       to_port     = 53
       protocol    = "udp"
-      cidr_blocks = ["10.0.0.0/8"]
+      cidr_blocks = ["10.0.1.0/24", "10.0.2.0/24"]
       description = "DNS UDP traffic to internal networks"
     },
     {
@@ -527,7 +527,7 @@ variable "resolver_security_group_rules" {
       from_port   = 53
       to_port     = 53
       protocol    = "tcp"
-      cidr_blocks = ["10.0.0.0/8"]
+      cidr_blocks = ["10.0.1.0/24", "10.0.2.0/24"]
       description = "DNS TCP traffic to internal networks"
     }
   ]
@@ -684,25 +684,24 @@ locals {
     }
   ]
 
-  # Flatten VPC associations for efficient creation
-  vpcs_associations = flatten([
-    for rule in var.rules : [
-      for vpc in lookup(rule, "vpc_ids") : {
-        vpc_id      = vpc
-        domain_name = lookup(rule, "domain_name")
-      }
-    ]
-  ])
+  # Optimized single-pass flattening for VPC and RAM associations
+  vpcs_associations = {
+    for rule in var.rules :
+    for vpc in lookup(rule, "vpc_ids") :
+    "${lookup(rule, "domain_name")}-${vpc}" => {
+      vpc_id      = vpc
+      domain_name = lookup(rule, "domain_name")
+    }
+  }
 
-  # Flatten RAM associations for cross-account sharing
-  ram_associations = flatten([
-    for rule in var.rules : [
-      for principal in lookup(rule, "principals", []) : {
-        principal_id = principal
-        ram_name     = lookup(rule, "ram_name", lookup(rule, "domain_name"))
-      }
-    ]
-  ])
+  ram_associations = {
+    for rule in var.rules :
+    for principal in lookup(rule, "principals", []) :
+    "${lookup(rule, "domain_name")}-${principal}" => {
+      principal_id = principal
+      ram_name     = lookup(rule, "ram_name", lookup(rule, "domain_name"))
+    }
+  }
 }
 ```
 
@@ -710,16 +709,15 @@ locals {
 **Manage complex resource dependencies:**
 
 ```hcl
-# Ensure proper creation order
+# Use for_each for safer resource creation
 resource "aws_route53_resolver_rule_association" "ra" {
-  count = length(local.vpcs_associations)
+  for_each = {
+    for idx, assoc in local.vpcs_associations : 
+    "${assoc.domain_name}-${assoc.vpc_id}" => assoc
+  }
   
-  resolver_rule_id = element(aws_route53_resolver_rule.r.*.id,
-    index(aws_route53_resolver_rule.r.*.domain_name, 
-          lookup(element(local.vpcs_associations, count.index), "domain_name")
-    )
-  )
-  vpc_id = lookup(element(local.vpcs_associations, count.index), "vpc_id")
+  resolver_rule_id = aws_route53_resolver_rule.r[each.value.domain_name].id
+  vpc_id          = each.value.vpc_id
 
   depends_on = [aws_route53_resolver_rule.r]
 }
