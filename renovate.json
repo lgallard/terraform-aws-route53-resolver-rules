@@ -5,7 +5,7 @@
   },
   "packageRules": [
     {
-      "datasources": ["terraform-provider"],
+      "datasources": ["terraform-provider", "terraform-module"],
       "updateTypes": ["major"],
       "enabled": false
     }
