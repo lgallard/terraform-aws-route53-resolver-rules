@@ -5,6 +5,15 @@ FIX:
 * fix(RAM): not working with principals = [] (thanks @astephanh)
 
 * Fix typo
+## [0.3.0](https://github.com/lgallard/terraform-aws-route53-resolver-rules/compare/0.2.0...0.3.0) (2025-07-28)
+
+
+### Features
+
+* add Renovate for dependency management ([#23](https://github.com/lgallard/terraform-aws-route53-resolver-rules/issues/23)) ([2c52eea](https://github.com/lgallard/terraform-aws-route53-resolver-rules/commit/2c52eead47e5f4b3a4cf0a65329066a21257ebd9))
+* standardize Claude Code Review workflow to use generic prompts ([6b0d8d9](https://github.com/lgallard/terraform-aws-route53-resolver-rules/commit/6b0d8d92a50a3131aaf7f53d73e6bb792fa82c94))
+* upgrade Claude Code Review to standardized codebot version ([1c3655d](https://github.com/lgallard/terraform-aws-route53-resolver-rules/commit/1c3655d7f39f83efc9a2a43837a04a112f46743a))
+
 ## [0.2.0](https://github.com/lgallard/terraform-aws-route53-resolver-rules/compare/0.1.5...0.2.0) (2025-07-23)
 
 
