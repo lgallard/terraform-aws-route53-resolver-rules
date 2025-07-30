@@ -64,7 +64,7 @@ locals {
       domain_name = lookup(rule, "domain_name", null)
       ram_name    = lookup(rule, "ram_name", "r53-${lookup(rule, "domain_name")}")
       vpc_ids     = lookup(rule, "vpc_ids", [])
-      ips         = lookup(rule, "ips", null)
+      ips         = lookup(rule, "ips", [])
       principals  = lookup(rule, "principals", [])
     }
   }
