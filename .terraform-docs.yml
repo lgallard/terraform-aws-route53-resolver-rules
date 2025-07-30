@@ -1,0 +1,120 @@
+# terraform-docs configuration for terraform-aws-route53-resolver-rules
+
+formatter: "markdown table"
+
+version: ""
+
+header-from: main.tf
+footer-from: ""
+
+recursive:
+  enabled: false
+  path: examples
+
+sections:
+  hide: []
+  show: []
+
+content: |-
+  {{ .Header }}
+
+  ## Usage
+
+  Before you start to forward queries, you must create Resolver outbound endpoints in the connected VPCs. These endpoints provide a path for inbound or outbound queries. To accomplish this you can create the endpoints using the [aws_route53_resolver_endpoint](https://www.terraform.io/docs/providers/aws/r/route53_resolver_endpoint.html) resource or use a module like the [terraform-aws-route53-endpoint](https://github.com/rhythmictech/terraform-aws-route53-endpoint)
+
+  Check the [examples](examples/) folder for the **simple** and the **complete** snippets.
+
+  ### Example (complete)
+
+  This example creates two rules in a outbound endpoint, using all the parameter expected for building the rules:
+
+  ```hcl
+  # Outbound endpoint using the rhythmictech/terraform-aws-route53-endpoint module
+  module "r53-outbound" {
+    source            = "git::https://github.com/rhythmictech/terraform-aws-route53-endpoint?ref=v0.3.1"
+    direction         = "outbound"
+    allowed_resolvers = ["192.168.0.0/24"]
+    vpc_id            = "vpc-0fffff0123456789"
+    ip_addresses      = [
+      {
+        ip        = "172.30.1.10"
+        subnet_id = "subnet-abcd123456789aaaa"
+      },
+      {
+        ip        = "172.30.2.10"
+        subnet_id = "subnet-abcd123456789bbbb"
+      }
+    ]
+  }
+
+  # AWS Route 53 Resolver rules
+  module "r53-resolver-rules" {
+    source               = "git::https://github.com/lgallard/terraform-aws-route53-resolver-rules.git?ref=0.2.0"
+    resolver_endpoint_id = module.r53-outbound.endpoint_id
+
+    rules = [
+      { rule_name   = "r53r-rule-1"
+        domain_name = "bar.foo."
+        ram_name    = "ram-r53r-1"
+        vpc_ids     = ["vpc-0fffff0123456789"]
+        ips         = ["192.168.10.10", "192.168.10.11:54"]
+        principals  = ["123456789101", "101987654321"]
+      },
+      {
+        rule_name   = "r53r-rule-2"
+        domain_name = "example.com."
+        ram_name    = "ram-r53r-2"
+        vpc_ids     = ["vpc-0fffff0123456789"]
+        ips         = ["192.168.10.10", "192.168.10.11:54"]
+        principals  = ["123456789101", "101987654321"]
+      }
+    ]
+  }
+  ```
+
+  **Note**: You can define IP and ports using the *IP:PORT* syntax, as shown above.
+
+  {{ .Requirements }}
+
+  {{ .Providers }}
+
+  {{ .Modules }}
+
+  {{ .Resources }}
+
+  {{ .Inputs }}
+
+  {{ .Outputs }}
+
+  {{ .Footer }}
+
+output:
+  file: "README.md"
+  mode: inject
+  template: |-
+    <!-- BEGIN_TF_DOCS -->
+    {{ .Content }}
+    <!-- END_TF_DOCS -->
+
+output-values:
+  enabled: false
+  from: ""
+
+sort:
+  enabled: true
+  by: name
+
+settings:
+  anchor: true
+  color: true
+  default: true
+  description: false
+  escape: true
+  hide-empty: false
+  html: true
+  indent: 2
+  lockfile: true
+  read-comments: true
+  required: true
+  sensitive: true
+  type: true

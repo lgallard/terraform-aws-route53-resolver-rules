@@ -80,7 +80,7 @@ The test suite requires the following AWS permissions:
 2. **Configure AWS Credentials**
    ```bash
    export AWS_ACCESS_KEY_ID="your-access-key"
-   export AWS_SECRET_ACCESS_KEY="your-secret-key"
+   export AWS_SECRET_ACCESS_KEY="your-secret-key"  # pragma: allowlist secret
    export AWS_DEFAULT_REGION="us-west-2"
    ```
 
