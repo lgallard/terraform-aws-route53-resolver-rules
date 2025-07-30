@@ -1,12 +1,21 @@
 {
-  "extends": ["config:base"],
+  "extends": [
+    "config:recommended"
+  ],
   "terraform": {
-    "ignoreDeps": ["hashicorp/terraform"]
+    "ignoreDeps": [
+      "hashicorp/terraform"
+    ]
   },
   "packageRules": [
     {
-      "datasources": ["terraform-provider", "terraform-module"],
-      "updateTypes": ["major"],
+      "matchDatasources": [
+        "terraform-provider",
+        "terraform-module"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
       "enabled": false
     }
   ]
