@@ -12,7 +12,7 @@ resource "aws_route53_resolver_rule" "r" {
     for_each = each.value.ips
     content {
       ip   = split(":", target_ip.value)[0]
-      port = can(tonumber(split(":", target_ip.value)[1])) ? tonumber(split(":", target_ip.value)[1]) : 53
+      port = length(split(":", target_ip.value)) > 1 && can(tonumber(split(":", target_ip.value)[1])) ? tonumber(split(":", target_ip.value)[1]) : 53
     }
   }
 

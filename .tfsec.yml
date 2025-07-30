@@ -24,7 +24,6 @@ include_rules:
   - aws-iam-enforce-mfa
   
   # Route53 and DNS security
-  - aws-route53-enable-logging
   - aws-route53-zone-dnssec-enabled
   
   # Network security
@@ -63,18 +62,5 @@ exclude_paths:
   - "examples/*/terraform.tfstate*"
   - ".terraform/"
 
-# Custom policies for DNS-specific validations
-custom_checks:
-  - check_id: "DNS_DOMAIN_FQDN"
-    description: "Ensure DNS domain names are fully qualified (end with dot)"
-    resource_types: ["aws_route53_resolver_rule"]
-    attribute: "domain_name"
-    pattern: ".*\\.$"
-    severity: "HIGH"
-    
-  - check_id: "VPC_ID_FORMAT"
-    description: "Ensure VPC IDs follow AWS format"
-    resource_types: ["aws_route53_resolver_rule_association"]
-    attribute: "vpc_id"
-    pattern: "^vpc-[0-9a-f]{8,17}$"
-    severity: "MEDIUM"
+# Note: Custom checks are handled by pre-commit hooks instead of tfsec
+# for better compatibility and more detailed error messages

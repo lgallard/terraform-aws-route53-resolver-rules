@@ -91,9 +91,11 @@ repos:
           - |
             for file in "$@"; do
               if grep -q "ips.*=" "$file"; then
+                # Check for invalid IP addresses (allowing 0.0.0.0 and proper port ranges)
                 if grep -E "ips.*=.*\[.*\"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?\"" "$file" | \
-                   grep -v -E "\"((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(:[1-9][0-9]{0,4})?\""; then
-                  echo "Warning: Invalid IP address format detected in $file" >&2
+                   grep -v -E "\"((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(:(6553[0-5]|655[0-2][0-9]|65[0-4][0-9]{2}|6[0-4][0-9]{3}|[1-5][0-9]{4}|[1-9][0-9]{0,3}|[1-9]))?\""; then
+                  echo "Error: Invalid IP address or port range detected in $file. Ports must be 1-65535" >&2
+                  exit 1
                 fi
               fi
             done
