@@ -1,0 +1,102 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0  # Updated to latest stable version
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+        args: ['--maxkb=500']  # Set specific file size limit
+      - id: detect-aws-credentials
+        args: ['--allow-missing-credentials']  # Avoid false positives
+      - id: check-yaml  # Added YAML validation
+      - id: check-merge-conflict  # Added merge conflict detection
+      - id: check-json  # Added JSON validation
+      - id: check-toml  # Added TOML validation
+      - id: detect-private-key  # Added private key detection
+      - id: mixed-line-ending
+        args: ['--fix=lf']  # Ensure consistent line endings
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.83.5  # Updated to latest stable version
+    hooks:
+      - id: terraform_fmt
+      - id: terraform_validate
+        args:
+          - --tf-init-args=-upgrade  # Ensure latest provider versions
+      - id: terraform_docs
+        args:
+          - --args=--config=.terraform-docs.yml  # Use config file for consistent documentation
+      - id: terraform_tflint  # Added terraform linter with DNS/networking rules
+        args:
+          - --args=--config=.tflint.hcl
+      - id: terraform_tfsec  # Added security scanner for networking/VPC configurations
+        args:
+          - --args=--config-file=.tfsec.yml
+          - --args=--exclude-downloaded-modules
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: '.*/tests/.*|.*/test/.*'  # Exclude test directories
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.16.23
+    hooks:
+      - id: typos
+        types: [markdown]
+        args: ['--format', 'brief']
+        exclude: 'CHANGELOG.md'  # Exclude changelog which may contain intentional "typos"
+  # DNS and networking specific validations
+  - repo: local
+    hooks:
+      - id: dns-domain-validation
+        name: DNS Domain Validation
+        entry: bash
+        args:
+          - -c
+          - |
+            for file in "$@"; do
+              # Check for domain_name assignments that don't end with a dot
+              if grep -E "domain_name\s*=\s*\"[^\"]+[^.\"]\"" "$file"; then
+                echo "Error: Domain names must end with a dot (.) for FQDN compliance in $file"
+                grep -n -E "domain_name\s*=\s*\"[^\"]+[^.\"]\"" "$file"
+                exit 1
+              fi
+            done
+        language: system
+        files: '\.tf$'
+        description: 'Validate that DNS domain names end with a dot for FQDN compliance'
+      - id: vpc-id-validation
+        name: VPC ID Format Validation
+        entry: bash
+        args:
+          - -c
+          - |
+            for file in "$@"; do
+              if grep -E "vpc_ids.*=.*\[.*\"vpc-[^\"]*\"" "$file"; then
+                if ! grep -E "vpc_ids.*=.*\[[^]]*\"vpc-[0-9a-f]{8,17}\"" "$file"; then
+                  echo "Warning: VPC IDs should follow AWS format (vpc-xxxxxxxx) in $file" >&2
+                fi
+              fi
+            done
+        language: system
+        files: '\.tf$'
+        description: 'Validate VPC ID format follows AWS naming convention'
+      - id: ip-address-validation
+        name: IP Address Format Validation
+        entry: bash
+        args:
+          - -c
+          - |
+            for file in "$@"; do
+              if grep -q "ips.*=" "$file"; then
+                if grep -E "ips.*=.*\[.*\"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?\"" "$file" | \
+                   grep -v -E "\"((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(:[1-9][0-9]{0,4})?\""; then
+                  echo "Warning: Invalid IP address format detected in $file" >&2
+                fi
+              fi
+            done
+        language: system
+        files: '\.tf$'
+        description: 'Validate IP addresses and optional port formats'

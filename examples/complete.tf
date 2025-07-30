@@ -4,7 +4,7 @@ module "r53-outboud" {
   direction         = "outbound"
   allowed_resolvers = ["192.168.0.0/24"]
   vpc_id            = "vpc-0fffff0123456789"
-  ip_addresses      = [
+  ip_addresses = [
     {
       ip        = "172.30.1.10"
       subnet_id = "subnet-abcd123456789aaaa"
@@ -19,7 +19,7 @@ module "r53-outboud" {
 # AWS Route 53 Resolver rules
 module "r53-resolver-rules" {
   source               = "git::https://github.com/lgallard/terraform-aws-route53-resolver-rules.git?ref=0.2.0"
-  resolver_endpoint_id = module.r53-outboud.endpoint_ids
+  resolver_endpoint_id = module.r53-outboud.endpoint_id
 
   rules = [
     { rule_name   = "r53r-rule-1"

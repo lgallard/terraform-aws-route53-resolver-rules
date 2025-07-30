@@ -106,10 +106,12 @@ locals {
 # These blocks enable seamless migration from v0.3.x to v0.4.x
 
 # Map resolver rules from count[N] to domain_name key
-moved {
-  from = aws_route53_resolver_rule.r[0]
-  to   = aws_route53_resolver_rule.r[var.rules[0].domain_name]
-}
+# Note: Dynamic expressions are not allowed in moved blocks
+# Users migrating from v0.3.x should use the migration script instead
+# moved {
+#   from = aws_route53_resolver_rule.r[0]
+#   to   = aws_route53_resolver_rule.r["example.com."]
+# }
 
 # Dynamic moved blocks would be ideal but are not supported yet
 # Users with multiple rules will need to use the migration script or manual state moves

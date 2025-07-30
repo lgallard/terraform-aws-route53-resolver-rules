@@ -1,0 +1,80 @@
+# tfsec configuration for terraform-aws-route53-resolver-rules
+# Focus on DNS and networking security best practices
+
+# Global settings
+severity_overrides:
+  HIGH: ERROR
+  MEDIUM: WARNING
+  LOW: INFO
+
+# Exclude certain rules that are not applicable to this module
+exclude:
+  # Route53 resolver rules don't directly manage encryption
+  - aws-route53-enable-logging  # Optional for resolver rules, not always needed
+  
+  # VPC and networking exclusions (module doesn't create VPCs)
+  - aws-vpc-add-description-to-security-group
+  - aws-vpc-add-description-to-security-group-rule
+  - aws-vpc-no-default-vpc  # Module uses existing VPCs
+
+# Include specific security checks relevant to DNS and networking
+include_rules:
+  # General AWS security
+  - aws-iam-no-policy-wildcards
+  - aws-iam-enforce-mfa
+  
+  # Route53 and DNS security
+  - aws-route53-enable-logging
+  - aws-route53-zone-dnssec-enabled
+  
+  # Network security
+  - aws-ec2-no-public-egress-sgr
+  - aws-ec2-no-public-ingress-sgr
+  - aws-vpc-no-public-ingress-sgr
+  - aws-vpc-no-public-egress-sgr
+  
+  # RAM sharing security
+  - aws-ram-avoid-resource-sharing-with-external-principals
+
+# Custom checks configuration
+config:
+  # Minimum TLS version for any HTTPS endpoints
+  minimum_tls_version: "1.2"
+  
+  # Allowed CIDR blocks for internal networks
+  allowed_internal_cidrs:
+    - "10.0.0.0/8"      # RFC 1918 - Class A
+    - "172.16.0.0/12"   # RFC 1918 - Class B  
+    - "192.168.0.0/16"  # RFC 1918 - Class C
+
+# Format configuration
+format: default
+output: stdout
+
+# Only scan Terraform files
+file_filters:
+  - "*.tf"
+  - "*.tfvars"
+
+# Exclude test and example directories from certain checks
+exclude_paths:
+  - "test/"
+  - "tests/"
+  - "examples/*/terraform.tfstate*"
+  - ".terraform/"
+
+# Custom policies for DNS-specific validations
+custom_checks:
+  - check_id: "DNS_DOMAIN_FQDN"
+    description: "Ensure DNS domain names are fully qualified (end with dot)"
+    resource_types: ["aws_route53_resolver_rule"]
+    attribute: "domain_name"
+    pattern: ".*\\.$"
+    severity: "HIGH"
+    
+  - check_id: "VPC_ID_FORMAT"
+    description: "Ensure VPC IDs follow AWS format"
+    resource_types: ["aws_route53_resolver_rule_association"]
+    attribute: "vpc_id"
+    pattern: "^vpc-[0-9a-f]{8,17}$"
+    severity: "MEDIUM"
