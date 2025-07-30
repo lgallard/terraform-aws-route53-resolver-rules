@@ -217,7 +217,7 @@ jobs:
 
           # Default values
           echo "mode=review" >> $GITHUB_OUTPUT
-          echo "focus=dns,route53,resolver,security,performance" >> $GITHUB_OUTPUT
+          echo "focus=code-quality,security,performance" >> $GITHUB_OUTPUT
           echo "verbose=false" >> $GITHUB_OUTPUT
           echo "include_tests=true" >> $GITHUB_OUTPUT
           echo "full_analysis=false" >> $GITHUB_OUTPUT
@@ -227,28 +227,28 @@ jobs:
             # Use grep with fixed strings where possible for security
             if echo "$SAFE_COMMENT" | grep -qiF "codebot hunt"; then
               echo "mode=hunt" >> $GITHUB_OUTPUT
-              echo "focus=dns,resolver-bugs,security,performance" >> $GITHUB_OUTPUT
+              echo "focus=bugs,security,performance" >> $GITHUB_OUTPUT
               echo "verbose=false" >> $GITHUB_OUTPUT
             elif echo "$SAFE_COMMENT" | grep -qiF "codebot analyze"; then
               echo "mode=analyze" >> $GITHUB_OUTPUT
-              echo "focus=dns-architecture,resolver-patterns,networking-complexity" >> $GITHUB_OUTPUT
+              echo "focus=architecture,patterns,complexity" >> $GITHUB_OUTPUT
               echo "verbose=true" >> $GITHUB_OUTPUT
             elif echo "$SAFE_COMMENT" | grep -qiF "codebot security"; then
               echo "mode=security" >> $GITHUB_OUTPUT
-              echo "focus=dns-security,resolver-vulnerabilities,route53-compliance" >> $GITHUB_OUTPUT
+              echo "focus=security,vulnerabilities,compliance" >> $GITHUB_OUTPUT
               echo "verbose=true" >> $GITHUB_OUTPUT
             elif echo "$SAFE_COMMENT" | grep -qiF "codebot performance"; then
               echo "mode=performance" >> $GITHUB_OUTPUT
-              echo "focus=dns-performance,resolver-optimization,network-bottlenecks" >> $GITHUB_OUTPUT
+              echo "focus=performance,optimization,bottlenecks" >> $GITHUB_OUTPUT
               echo "verbose=true" >> $GITHUB_OUTPUT
             elif echo "$SAFE_COMMENT" | grep -qiF "codebot review"; then
               echo "mode=review" >> $GITHUB_OUTPUT
-              echo "focus=dns,route53,resolver,security,performance" >> $GITHUB_OUTPUT
+              echo "focus=code-quality,security,performance" >> $GITHUB_OUTPUT
               echo "verbose=true" >> $GITHUB_OUTPUT
             elif echo "$SAFE_COMMENT" | grep -qiF "codebot"; then
               # Default to hunt mode for simple "codebot" command
               echo "mode=hunt" >> $GITHUB_OUTPUT
-              echo "focus=dns,resolver-bugs,security,performance" >> $GITHUB_OUTPUT
+              echo "focus=bugs,security,performance" >> $GITHUB_OUTPUT
               echo "verbose=false" >> $GITHUB_OUTPUT
             fi
 
@@ -259,11 +259,11 @@ jobs:
 
             # Check for specific focus areas
             if echo "$SAFE_COMMENT" | grep -qiF "security"; then
-              echo "focus=dns-security,resolver-vulnerabilities,route53-compliance" >> $GITHUB_OUTPUT
+              echo "focus=security,vulnerabilities,compliance" >> $GITHUB_OUTPUT
             elif echo "$SAFE_COMMENT" | grep -qiF "performance"; then
-              echo "focus=dns-performance,resolver-optimization,network-bottlenecks" >> $GITHUB_OUTPUT
+              echo "focus=performance,optimization,bottlenecks" >> $GITHUB_OUTPUT
             elif echo "$SAFE_COMMENT" | grep -qiF "tests"; then
-              echo "focus=dns-test-coverage,resolver-test-quality" >> $GITHUB_OUTPUT
+              echo "focus=test-coverage,test-quality" >> $GITHUB_OUTPUT
             fi
 
             # Check for --full flag (analyze entire codebase)
@@ -383,9 +383,9 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
           # Optional: Add specific tools for running tests or linting
-          # allowed_tools: "Bash(go test ./...),Bash(terraform validate),Bash(terraform fmt -check)"
+          # allowed_tools: "Bash(npm run test),Bash(npm run lint),Bash(npm run typecheck)"
 
-          # Dynamic prompt based on review mode with Route53/DNS focus
+          # Dynamic prompt based on review mode
           direct_prompt: |
             ${{ steps.parse-command.outputs.full_analysis == 'false' && format('
             **IMPORTANT: Focus ONLY on the following changed files in this pull request:**
@@ -396,69 +396,64 @@ jobs:
             ', steps.changes.outputs.changed_files || 'Unable to determine changed files', steps.changes.outputs.changed_count || '0') || '' }}
 
             ${{ steps.parse-command.outputs.mode == 'hunt' && format('
-            🕵️ BUG HUNT MODE - Find DNS/Route53 Resolver issues quickly:
-            - Focus on critical DNS resolver bugs, security vulnerabilities, and network performance issues
-            - Check for proper DNS query forwarding and routing logic
-            - Identify potential DNS resolution failures or misconfigurations
-            - Look for Route53 Resolver rule conflicts or invalid conditions
-            - Prioritize high-impact DNS/networking problems over style suggestions
-            - Be concise and actionable with DNS-specific recommendations
+            🕵️ BUG HUNT MODE - Find potential issues quickly:
+            - Focus on critical bugs, security vulnerabilities, and performance issues
+            - Prioritize high-impact problems over style suggestions
+            - Be concise and actionable
+            - Provide clear, actionable feedback
             ') || '' }}
 
             ${{ steps.parse-command.outputs.mode == 'analyze' && format('
-            📊 ANALYSIS MODE - Deep DNS/networking technical analysis:
-            - Analyze DNS resolver architecture, patterns, and design decisions
-            - Evaluate Route53 resolver rule complexity and maintainability
-            - Assess DNS query routing logic and forwarding strategies
-            - Review VPC DNS configuration and cross-region resolver setup
-            - Provide strategic recommendations for DNS infrastructure scalability
-            - Consider long-term implications for DNS resolution performance
+            📊 ANALYSIS MODE - Deep technical analysis:
+            - Analyze architecture, patterns, and design decisions
+            - Evaluate code complexity and maintainability
+            - Assess test coverage and quality
+            - Provide strategic recommendations
+            - Consider long-term implications and scalability
             ') || '' }}
 
             ${{ steps.parse-command.outputs.mode == 'security' && format('
-            🔒 SECURITY MODE - DNS/Route53 security-focused review:
-            - Identify DNS security vulnerabilities and compliance issues
-            - Check for proper DNS query logging and monitoring
-            - Validate DNS resolver rule access controls and permissions
-            - Review DNS data exfiltration prevention measures
-            - Assess Route53 Resolver endpoint security configurations
-            - Check for DNS cache poisoning protection mechanisms
+            🔒 SECURITY MODE - Security-focused review:
+            - Identify security vulnerabilities and compliance issues
+            - Check for proper authentication and authorization
+            - Validate input sanitization and output encoding
+            - Review encryption and key management
+            - Assess data protection and privacy concerns
             ') || '' }}
 
             ${{ steps.parse-command.outputs.mode == 'performance' && format('
-            ⚡ PERFORMANCE MODE - DNS/networking performance optimization:
-            - Identify DNS resolution bottlenecks and optimization opportunities
-            - Analyze Route53 resolver query performance and latency
-            - Check for efficient DNS caching strategies and TTL configurations
-            - Review network endpoint optimization for resolver rules
-            - Consider DNS load balancing and failover mechanisms
-            - Assess cross-AZ and cross-region resolver performance
+            ⚡ PERFORMANCE MODE - Performance optimization review:
+            - Identify performance bottlenecks and optimization opportunities
+            - Analyze resource usage and efficiency
+            - Check for memory leaks and scalability issues
+            - Review caching strategies and database queries
+            - Consider load testing and monitoring needs
             ') || '' }}
 
             ${{ steps.parse-command.outputs.mode == 'review' && format('
-            📝 STANDARD REVIEW MODE - Comprehensive Route53/DNS review:
-            - Code quality and Terraform best practices for DNS resources
-            - Potential DNS resolver bugs or misconfigurations
-            - Route53 resolver performance considerations
-            - DNS security concerns and compliance
-            - Test coverage for DNS resolution scenarios
+            📝 STANDARD REVIEW MODE - Comprehensive code review:
+            - Code quality and best practices
+            - Potential bugs or issues
+            - Performance considerations
+            - Security concerns
+            - Test coverage and quality
 
             Focus areas: {0}
             Verbose output: {1}
 
-            Be constructive and helpful with DNS/networking expertise.
+            Be constructive and helpful.
             ', steps.parse-command.outputs.focus, steps.parse-command.outputs.verbose) || '' }}
 
           # Use sticky comments for better UX
           use_sticky_comment: true
 
-      - name: Workflow Summary  
+      - name: Workflow Summary
         if: always()
         timeout-minutes: 2
         run: |
           set -euo pipefail  # Enhanced error handling
 
-          echo "## 🤖 Route53 Resolver Rules - Claude Code Review Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## 🤖 Claude Code Review Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Security Status
@@ -483,20 +478,20 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Available Commands
-          echo "### 📝 Available Commands (DNS/Route53 Specialized)" >> $GITHUB_STEP_SUMMARY
-          echo "Comment any of these in PRs to trigger DNS-focused review types:" >> $GITHUB_STEP_SUMMARY
-          echo "- \`codebot hunt\` - Quick DNS resolver bug detection on PR changes" >> $GITHUB_STEP_SUMMARY
-          echo "- \`codebot analyze\` - Deep Route53 resolver architecture analysis on PR changes" >> $GITHUB_STEP_SUMMARY
-          echo "- \`codebot security\` - DNS security-focused review on PR changes" >> $GITHUB_STEP_SUMMARY
-          echo "- \`codebot performance\` - DNS performance optimization review on PR changes" >> $GITHUB_STEP_SUMMARY
-          echo "- \`codebot review\` - Comprehensive Route53 resolver review on PR changes" >> $GITHUB_STEP_SUMMARY
-          echo "- \`codebot\` - Defaults to DNS hunt mode on PR changes" >> $GITHUB_STEP_SUMMARY
+          echo "### 📝 Available Commands" >> $GITHUB_STEP_SUMMARY
+          echo "Comment any of these in PRs to trigger specific review types:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`codebot hunt\` - Quick bug detection (like Bugbot) on PR changes" >> $GITHUB_STEP_SUMMARY
+          echo "- \`codebot analyze\` - Deep technical analysis on PR changes" >> $GITHUB_STEP_SUMMARY
+          echo "- \`codebot security\` - Security-focused review on PR changes" >> $GITHUB_STEP_SUMMARY
+          echo "- \`codebot performance\` - Performance optimization review on PR changes" >> $GITHUB_STEP_SUMMARY
+          echo "- \`codebot review\` - Comprehensive review on PR changes" >> $GITHUB_STEP_SUMMARY
+          echo "- \`codebot\` - Defaults to hunt mode on PR changes" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Scope Options
           echo "### 🔍 Scope Options" >> $GITHUB_STEP_SUMMARY
-          echo "- Add \`--full\` to any command to analyze the entire Route53 resolver codebase" >> $GITHUB_STEP_SUMMARY
-          echo "- Example: \`codebot hunt --full\` - Hunt for DNS bugs in the entire codebase" >> $GITHUB_STEP_SUMMARY
+          echo "- Add \`--full\` to any command to analyze the entire codebase" >> $GITHUB_STEP_SUMMARY
+          echo "- Example: \`codebot hunt --full\` - Hunt for bugs in the entire codebase" >> $GITHUB_STEP_SUMMARY
           echo "- Default behavior (without --full) focuses only on changed files in the PR" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
@@ -516,4 +511,3 @@ jobs:
           echo "- ⏱️ Timeout protection prevents runaway executions" >> $GITHUB_STEP_SUMMARY
           echo "- 🛡️ Comprehensive error handling and validation" >> $GITHUB_STEP_SUMMARY
           echo "- 📊 Enhanced logging for troubleshooting" >> $GITHUB_STEP_SUMMARY
-          echo "- 🌐 Specialized for AWS Route53 Resolver Rules infrastructure" >> $GITHUB_STEP_SUMMARY
