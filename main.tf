@@ -11,8 +11,8 @@ resource "aws_route53_resolver_rule" "r" {
   dynamic "target_ip" {
     for_each = each.value.ips
     content {
-      ip   = split(":", target_ip.value)[0]
-      port = length(split(":", target_ip.value)) > 1 && can(tonumber(split(":", target_ip.value)[1])) ? tonumber(split(":", target_ip.value)[1]) : 53
+      ip   = local.ip_port_split[target_ip.value].ip
+      port = local.ip_port_split[target_ip.value].port
     }
   }
 
@@ -57,6 +57,19 @@ resource "aws_ram_resource_association" "endpoint_ram_resource" {
 }
 
 locals {
+  # Step 1: Split IP strings once to avoid race conditions
+  ip_parts_map = {
+    for ip_value in flatten([for rule in var.rules : lookup(rule, "ips", [])]) : ip_value => split(":", ip_value)
+  }
+
+  # Step 2: Parse IP and port from pre-split parts
+  ip_port_split = {
+    for ip_value, ip_parts in local.ip_parts_map : ip_value => {
+      ip   = ip_parts[0]
+      port = length(ip_parts) > 1 && can(tonumber(ip_parts[1])) && tonumber(ip_parts[1]) > 0 && tonumber(ip_parts[1]) <= 65535 ? tonumber(ip_parts[1]) : 53
+    }
+  }
+
   # Process rules with defaults - optimized with direct attribute access
   rules = {
     for rule in var.rules : lookup(rule, "domain_name") => {

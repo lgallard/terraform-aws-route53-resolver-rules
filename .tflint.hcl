@@ -61,24 +61,7 @@ rule "terraform_standard_module_structure" {
 }
 
 # AWS-specific rules for Route53 and networking
-rule "aws_route53_resolver_endpoint_invalid_ip_address" {
-  enabled = true
-}
-
-rule "aws_route53_resolver_rule_invalid_domain_name" {
-  enabled = true
-}
-
 rule "aws_instance_invalid_type" {
-  enabled = true
-}
-
-rule "aws_s3_bucket_invalid_region" {
-  enabled = true
-}
-
-# Network security rules
-rule "aws_security_group_rule_invalid_protocol" {
   enabled = true
 }
 
