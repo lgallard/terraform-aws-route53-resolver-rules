@@ -5,6 +5,19 @@ FIX:
 * fix(RAM): not working with principals = [] (thanks @astephanh)
 
 * Fix typo
+## [0.5.0](https://github.com/lgallard/terraform-aws-route53-resolver-rules/compare/0.4.0...0.5.0) (2025-07-30)
+
+
+### Features
+
+* replicate security-hardened Claude Code Review workflow with DNS/Route53 focus ([#36](https://github.com/lgallard/terraform-aws-route53-resolver-rules/issues/36)) ([4273a4d](https://github.com/lgallard/terraform-aws-route53-resolver-rules/commit/4273a4d3b32f43ee2e60f40fe46721db56074961))
+
+
+### Bug Fixes
+
+* resolve "Cannot use a null value in for_each" when ips field is omitted ([#35](https://github.com/lgallard/terraform-aws-route53-resolver-rules/issues/35)) ([87ee5d3](https://github.com/lgallard/terraform-aws-route53-resolver-rules/commit/87ee5d3ae9e29fea6d32664f4422d31440bb7f9e))
+* resolve index() function failure with migration support ([#34](https://github.com/lgallard/terraform-aws-route53-resolver-rules/issues/34)) ([de8b3e0](https://github.com/lgallard/terraform-aws-route53-resolver-rules/commit/de8b3e061f3aceacfcea85afa6dfde175962f940))
+
 ## [0.4.0](https://github.com/lgallard/terraform-aws-route53-resolver-rules/compare/0.3.0...0.4.0) (2025-07-28)
 
 
