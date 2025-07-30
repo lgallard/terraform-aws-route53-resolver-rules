@@ -89,14 +89,33 @@ repos:
         args:
           - -c
           - |
+            # IP validation with simplified, maintainable regex patterns
             for file in "$@"; do
               if grep -q "ips.*=" "$file"; then
-                # Check for invalid IP addresses (allowing 0.0.0.0 and proper port ranges)
-                if grep -E "ips.*=.*\[.*\"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?\"" "$file" | \
-                   grep -v -E "\"((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(:(6553[0-5]|655[0-2][0-9]|65[0-4][0-9]{2}|6[0-4][0-9]{3}|[1-5][0-9]{4}|[1-9][0-9]{0,3}|[1-9]))?\""; then
-                  echo "Error: Invalid IP address or port range detected in \"$file\". Ports must be 1-65535" >&2
-                  exit 1
-                fi
+                # Extract IP addresses from ips = [...] arrays
+                grep -E "ips.*=.*\[.*\"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?\"" "$file" | while read -r line; do
+                  # Extract individual IP:port pairs
+                  echo "$line" | grep -oE '"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?"' | tr -d '"' | while read -r ip_port; do
+                    ip=$(echo "$ip_port" | cut -d':' -f1)
+                    port=$(echo "$ip_port" | cut -d':' -f2 -s)
+                    
+                    # Validate IP octets (0-255)
+                    for octet in $(echo "$ip" | tr '.' ' '); do
+                      if [[ ! "$octet" =~ ^[0-9]+$ ]] || [ "$octet" -gt 255 ]; then
+                        echo "Error: Invalid IP address '$ip' in \"$file\"" >&2
+                        exit 1
+                      fi
+                    done
+                    
+                    # Validate port range (1-65535) if specified
+                    if [ -n "$port" ]; then
+                      if [[ ! "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+                        echo "Error: Invalid port '$port' in \"$file\". Ports must be 1-65535" >&2
+                        exit 1
+                      fi
+                    fi
+                  done
+                done
               fi
             done
         language: system

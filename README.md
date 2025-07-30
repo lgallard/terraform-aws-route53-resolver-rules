@@ -15,7 +15,7 @@ This example creates two rules in a outbound endpoint, using all the parameter e
 
 ```
 # Outbound endpoint using the rhythmictech/terraform-aws-route53-endpoint module
-module "r53-outboud" {
+module "r53-outbound" {
   source            = "git::https://github.com/rhythmictech/terraform-aws-route53-endpoint?ref=v0.3.1"
   direction         = "outbound"
   allowed_resolvers = ["192.168.0.0/24"]
@@ -35,7 +35,7 @@ module "r53-outboud" {
 # AWS Route 53 Resolver rules
 module "r53-resolver-rules" {
   source               = "git::https://github.com/lgallard/terraform-aws-route53-resolver-rules.git?ref=0.2.0"
-  resolver_endpoint_id = module.r53-outboud.endpoint_ids
+  resolver_endpoint_id = module.r53-outbound.endpoint_id
 
   rules = [
     { rule_name   = "r53r-rule-1"
@@ -193,7 +193,7 @@ This example creates two rules in a outbound endpoint, using all the parameter e
 
 ```hcl
 # Outbound endpoint using the rhythmictech/terraform-aws-route53-endpoint module
-module "r53-outboud" {
+module "r53-outbound" {
   source            = "git::https://github.com/rhythmictech/terraform-aws-route53-endpoint?ref=v0.3.1"
   direction         = "outbound"
   allowed_resolvers = ["192.168.0.0/24"]
@@ -213,7 +213,7 @@ module "r53-outboud" {
 # AWS Route 53 Resolver rules
 module "r53-resolver-rules" {
   source               = "git::https://github.com/lgallard/terraform-aws-route53-resolver-rules.git?ref=0.2.0"
-  resolver_endpoint_id = module.r53-outboud.endpoint_ids
+  resolver_endpoint_id = module.r53-outbound.endpoint_id
 
   rules = [
     { rule_name   = "r53r-rule-1"
@@ -248,7 +248,7 @@ module "r53-resolver-rules" {
 
 | Name | Version |
 |------|---------|
-| <a name="provider_aws"></a> [aws](#provider\_aws) | >= 4.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.6.0 |
 
 ## Modules
 
