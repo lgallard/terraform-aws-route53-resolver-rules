@@ -23,11 +23,11 @@ variable "rules" {
 
   validation {
     condition = alltrue([
-      for rule in var.rules : can(rule.ips) && alltrue([
+      for rule in var.rules : !can(rule.ips) || rule.ips == null || alltrue([
         for ip in rule.ips : can(regex("^((25[0-5]|(2[0-4]|1\\d|[1-9]?)\\d)\\.){3}(25[0-5]|(2[0-4]|1\\d|[1-9]?)\\d)(:[1-9]\\d{0,4}|:6553[0-5]|:655[0-2]\\d|:65[0-4]\\d{2}|:6[0-4]\\d{3})?$", ip)) || can(regex("^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^::1$|^::$|^([0-9a-fA-F]{1,4}:)*::([0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{1,4}$", ip))
       ])
     ])
-    error_message = "Each IP in the ips list must be a valid IPv4 address (optionally with port 1-65535) or IPv6 address."
+    error_message = "When provided, each IP in the ips list must be a valid IPv4 address (optionally with port 1-65535) or IPv6 address."
   }
 
   validation {
