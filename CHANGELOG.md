@@ -5,6 +5,13 @@ FIX:
 * fix(RAM): not working with principals = [] (thanks @astephanh)
 
 * Fix typo
+## [0.7.0](https://github.com/lgallard/terraform-aws-route53-resolver-rules/compare/0.6.0...0.7.0) (2025-08-07)
+
+
+### Features
+
+* add Claude dispatch workflow for repository events ([#43](https://github.com/lgallard/terraform-aws-route53-resolver-rules/issues/43)) ([d3e249e](https://github.com/lgallard/terraform-aws-route53-resolver-rules/commit/d3e249e15447f7fb818c3e14031f8a6a20f6bf8c))
+
 ## [0.6.0](https://github.com/lgallard/terraform-aws-route53-resolver-rules/compare/0.5.0...0.6.0) (2025-07-30)
 
 
