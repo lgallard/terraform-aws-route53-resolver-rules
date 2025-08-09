@@ -847,4 +847,84 @@ nslookup internal.company.com 169.254.169.253
 aws route53resolver get-resolver-endpoint --resolver-endpoint-id rslvr-out-12345
 ```
 
+## MCP Server Configuration
+
+### Available MCP Servers
+This project is configured to use the following Model Context Protocol (MCP) servers for enhanced documentation access:
+
+#### Terraform MCP Server
+**Purpose**: Access up-to-date Terraform and AWS provider documentation
+**Package**: `@modelcontextprotocol/server-terraform`
+
+**Local Configuration** (`.mcp.json`):
+```json
+{
+  "mcpServers": {
+    "terraform": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-terraform@latest"]
+    }
+  }
+}
+```
+
+**Usage Examples**:
+- `Look up aws_route53_resolver_rule resource documentation`
+- `Find the latest Route53 Resolver configuration examples`
+- `Search for AWS Route53 Resolver Terraform modules`
+- `Get documentation for aws_route53_resolver_rule_association resource`
+
+#### Context7 MCP Server
+**Purpose**: Access general library and framework documentation
+**Package**: `@upstash/context7-mcp`
+
+**Local Configuration** (`.mcp.json`):
+```json
+{
+  "mcpServers": {
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@latest"]
+    }
+  }
+}
+```
+
+**Usage Examples**:
+- `Look up Go testing patterns for Terratest`
+- `Find AWS CLI Route53 Resolver commands documentation`
+- `Get current DNS best practices and security patterns`
+- `Search for GitHub Actions workflow patterns`
+
+### GitHub Actions Integration
+The MCP servers are automatically available in GitHub Actions through the claude.yml workflow configuration. Claude can access the same documentation in PRs and issues as available locally.
+
+### Usage Tips
+1. **Be Specific**: When requesting documentation, specify the exact resource or concept
+2. **Version Awareness**: Both servers provide current, version-specific documentation
+3. **Combine Sources**: Use Terraform MCP for Route53 Resolver-specific docs, Context7 for general development patterns
+4. **Local vs CI**: Same MCP servers work in both local development and GitHub Actions
+
+### Example Workflows
+
+**Route53 Resolver Resource Development**:
+```
+@claude I need to add support for DNS query logging to resolver rules. Can you look up the latest aws_route53_resolver_query_log_config documentation and show me how to implement this feature?
+```
+
+**Testing Pattern Research**:
+```
+@claude Look up current Terratest patterns for testing Route53 Resolver rules and help me add comprehensive tests for the DNS forwarding functionality.
+```
+
+**Security Enhancement**:
+```
+@claude Research the latest Route53 Resolver security best practices and help me implement enhanced monitoring and access controls in this module.
+```
+
+**Cross-Account Sharing Development**:
+```
+@claude Look up the latest AWS RAM sharing patterns for Route53 Resolver rules and help me improve the cross-account DNS management functionality.
+```
+
 *Note: This module focuses on DNS forwarding rules and requires coordination with Route53 Resolver endpoints for complete DNS resolution functionality.*
