@@ -5,6 +5,13 @@ FIX:
 * fix(RAM): not working with principals = [] (thanks @astephanh)
 
 * Fix typo
+## [0.8.0](https://github.com/lgallard/terraform-aws-route53-resolver-rules/compare/0.7.0...0.8.0) (2025-08-09)
+
+
+### Features
+
+* add MCP server support for enhanced documentation access ([#45](https://github.com/lgallard/terraform-aws-route53-resolver-rules/issues/45)) ([b4f99d0](https://github.com/lgallard/terraform-aws-route53-resolver-rules/commit/b4f99d09d66ba754da6156ecdfa25e0611fd3729))
+
 ## [0.7.0](https://github.com/lgallard/terraform-aws-route53-resolver-rules/compare/0.6.0...0.7.0) (2025-08-07)
 
 
