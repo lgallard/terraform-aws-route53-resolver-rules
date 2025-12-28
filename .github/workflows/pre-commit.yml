@@ -38,9 +38,10 @@ jobs:
         with:
           terraform_version: '1.3.0'
 
-      - name: Install tflint
-        run: |
-          curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.54.0
 
       - name: Install pre-commit
         run: |
@@ -65,8 +66,8 @@ jobs:
           if [ "${{ github.event_name }}" == "push" ]; then
             pre-commit run --all-files
           else
-            git fetch origin ${{ github.base_ref }}
-            CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '*.tf' '*.tfvars')
+            git fetch origin ${{ github.base_ref }} || exit 1
+            CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '*.tf' '*.tfvars' | tr '\n' ' ')
             if [ -n "$CHANGED_FILES" ]; then
               echo "Running pre-commit on changed files:"
               echo "$CHANGED_FILES"
